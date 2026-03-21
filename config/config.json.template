@@ -1,0 +1,25 @@
+{
+    "exchange": {
+        "name": "okx",
+        "api_key": "YOUR_API_KEY",
+        "secret_key": "YOUR_SECRET_KEY",
+        "passphrase": "YOUR_PASSPHRASE",
+        "base_url": "https://www.okx.com",
+        "simulated": true
+    },
+    "market": {
+        "instruments": ["BTC-USDT"],
+        "poll_interval_ms": 200
+    },
+    "strategy": {
+        "name": "buy_once",
+        "instrument": "BTC-USDT",
+        "side": "buy",
+        "size": "10"
+    },
+    "shm": {
+        "market_data": "/cts_market_data",
+        "signal": "/cts_signal"
+    },
+    "log_dir": "logs"
+}
