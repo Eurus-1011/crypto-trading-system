@@ -3,20 +3,8 @@
         "name": "okx",
         "api_key": "YOUR_API_KEY",
         "secret_key": "YOUR_SECRET_KEY",
-        "passphrase": "YOUR_PASSPHRASE",
-        "base_url": "https://www.okx.com",
-        "ws_public_url": "wss://ws.okx.com/ws/v5/public",
-        "ws_private_url": "wss://ws.okx.com/ws/v5/private"
+        "passphrase": "YOUR_PASSPHRASE"
     },
-    "shm": {
-        "ticker": "/cts_ticker",
-        "bbo": "/cts_bbo",
-        "depth": "/cts_depth",
-        "trade": "/cts_trade",
-        "signal": "/cts_signal"
-    },
-    "log_dir": "logs",
-
     "quotation_engine": {
         "instruments": ["BTC-USDT"],
         "channels": ["tickers", "books5", "bbo-tbt", "trades"],

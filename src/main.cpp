@@ -9,6 +9,8 @@
 #include <csignal>
 #include <thread>
 
+static const std::string LOG_PATH = "logs/system.log";
+
 static QuotationEngine* g_quotation_engine = nullptr;
 static StrategyEngine* g_strategy_engine = nullptr;
 static TradingEngine* g_trading_engine = nullptr;
@@ -28,7 +30,7 @@ static void OnSignal(int) {
 static std::string GetPublicIP() {
     std::array<char, 128> buffer;
     std::string result;
-    FILE* pipe = popen("curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null", "r");
+    FILE* pipe = popen("curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null", "r");
     if (!pipe) {
         return "unknown";
     }
@@ -54,17 +56,20 @@ static std::string JoinStrings(const std::vector<std::string>& vec) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string config_path = (argc > 1) ? argv[1] : "config/config.json";
+    InitLog(LOG_PATH);
+
+    if (argc < 2) {
+        ERROR("Usage: crypto-trading-system <config_path>");
+        return 1;
+    }
+    std::string config_path = argv[1];
 
     SystemConfig config;
     std::string err;
     if (!LoadConfig(config_path, config, err)) {
-        InitLog("logs/system.log");
         ERROR("Load config failed: [DETAIL] " + err);
         return 1;
     }
-
-    InitLog(config.log_dir + "/system.log");
 
     std::string public_ip = GetPublicIP();
 
@@ -72,13 +77,11 @@ int main(int argc, char* argv[]) {
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +
          JoinStrings(config.quotation_engine.channels) + ", [STRATEGY] " + config.strategy_engine.name);
 
-    INFO("Add this IP to your API whitelist: [PUBLIC_IP] " + public_ip);
-
-    auto* ticker_ring = shm_create<Ticker, 4096>(config.shm.ticker.c_str());
-    auto* bbo_ring = shm_create<BBO, 8192>(config.shm.bbo.c_str());
-    auto* depth_ring = shm_create<Depth, 2048>(config.shm.depth.c_str());
-    auto* trade_ring = shm_create<Trade, 8192>(config.shm.trade.c_str());
-    auto* signal_ring = shm_create<Signal, 1024>(config.shm.signal.c_str());
+    auto* ticker_ring = shm_create<Ticker, 4096>(SHM_TICKER);
+    auto* bbo_ring = shm_create<BBO, 8192>(SHM_BBO);
+    auto* depth_ring = shm_create<Depth, 2048>(SHM_DEPTH);
+    auto* trade_ring = shm_create<Trade, 8192>(SHM_TRADE);
+    auto* signal_ring = shm_create<Signal, 1024>(SHM_SIGNAL);
 
     if (!ticker_ring || !bbo_ring || !depth_ring || !trade_ring || !signal_ring) {
         ERROR("Create SHM failed");
@@ -109,11 +112,11 @@ int main(int argc, char* argv[]) {
 
     INFO("Stop all engines success, cleaning up");
 
-    shm_destroy(config.shm.ticker.c_str(), ticker_ring);
-    shm_destroy(config.shm.bbo.c_str(), bbo_ring);
-    shm_destroy(config.shm.depth.c_str(), depth_ring);
-    shm_destroy(config.shm.trade.c_str(), trade_ring);
-    shm_destroy(config.shm.signal.c_str(), signal_ring);
+    shm_destroy(SHM_TICKER, ticker_ring);
+    shm_destroy(SHM_BBO, bbo_ring);
+    shm_destroy(SHM_DEPTH, depth_ring);
+    shm_destroy(SHM_TRADE, trade_ring);
+    shm_destroy(SHM_SIGNAL, signal_ring);
 
     INFO("System shutdown complete");
     return 0;

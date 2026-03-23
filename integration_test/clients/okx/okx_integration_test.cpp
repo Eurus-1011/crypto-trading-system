@@ -16,14 +16,11 @@ static ExchangeConfig MakeLiveConfig() {
     config.api_key = "not_needed_for_public";
     config.secret_key = "not_needed_for_public";
     config.passphrase = "not_needed_for_public";
-    config.base_url = "https://www.okx.com";
-    config.ws_public_url = "wss://ws.okx.com:8443/ws/v5/public";
-    config.ws_private_url = "wss://ws.okx.com:8443/ws/v5/private";
     return config;
 }
 
 class OkxIntegrationTest : public ::testing::Test {
-protected:
+  protected:
     OkxClient client{MakeLiveConfig()};
 };
 
@@ -63,11 +60,8 @@ TEST_F(OkxIntegrationTest, ReceiveLiveTicker) {
     EXPECT_GT(captured.volume_24h, 0.0);
 
     std::cout << "[LiveTicker] BTC-USDT"
-              << " last=" << captured.last_price
-              << " bid=" << captured.bid_price
-              << " ask=" << captured.ask_price
-              << " vol24h=" << captured.volume_24h
-              << std::endl;
+              << " last=" << captured.last_price << " bid=" << captured.bid_price << " ask=" << captured.ask_price
+              << " vol24h=" << captured.volume_24h << std::endl;
 }
 
 TEST_F(OkxIntegrationTest, ReceiveLiveBBO) {
@@ -104,9 +98,8 @@ TEST_F(OkxIntegrationTest, ReceiveLiveBBO) {
     EXPECT_GT(captured.ask_volume, 0.0);
 
     std::cout << "[LiveBBO] BTC-USDT"
-              << " bid=" << captured.bid_price << "x" << captured.bid_volume
-              << " ask=" << captured.ask_price << "x" << captured.ask_volume
-              << std::endl;
+              << " bid=" << captured.bid_price << "x" << captured.bid_volume << " ask=" << captured.ask_price << "x"
+              << captured.ask_volume << std::endl;
 }
 
 TEST_F(OkxIntegrationTest, ReceiveLiveDepth) {
@@ -150,10 +143,8 @@ TEST_F(OkxIntegrationTest, ReceiveLiveDepth) {
     }
 
     std::cout << "[LiveDepth] BTC-USDT"
-              << " best_bid=" << captured.bids[0].price
-              << " best_ask=" << captured.asks[0].price
-              << " spread=" << (captured.asks[0].price - captured.bids[0].price)
-              << " levels=" << captured.ask_levels
+              << " best_bid=" << captured.bids[0].price << " best_ask=" << captured.asks[0].price
+              << " spread=" << (captured.asks[0].price - captured.bids[0].price) << " levels=" << captured.ask_levels
               << std::endl;
 }
 
@@ -191,9 +182,6 @@ TEST_F(OkxIntegrationTest, ReceiveLiveTrade) {
 
     std::string side_str = (captured.side == TradeSide::BUY) ? "buy" : "sell";
     std::cout << "[LiveTrade] BTC-USDT"
-              << " id=" << captured.trade_id
-              << " price=" << captured.price
-              << " volume=" << captured.volume
-              << " side=" << side_str
-              << std::endl;
+              << " id=" << captured.trade_id << " price=" << captured.price << " volume=" << captured.volume
+              << " side=" << side_str << std::endl;
 }

@@ -11,17 +11,6 @@ struct ExchangeConfig {
     std::string api_key;
     std::string secret_key;
     std::string passphrase;
-    std::string base_url;
-    std::string ws_public_url;
-    std::string ws_private_url;
-};
-
-struct ShmConfig {
-    std::string ticker;
-    std::string bbo;
-    std::string depth;
-    std::string trade;
-    std::string signal;
 };
 
 struct QuotationEngineConfig {
@@ -44,8 +33,6 @@ struct TradingEngineConfig {
 
 struct SystemConfig {
     ExchangeConfig exchange;
-    ShmConfig shm;
-    std::string log_dir;
     QuotationEngineConfig quotation_engine;
     StrategyEngineConfig strategy_engine;
     TradingEngineConfig trading_engine;
@@ -86,18 +73,6 @@ inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& 
     out.exchange.api_key = exchange.get("api_key", "").asString();
     out.exchange.secret_key = exchange.get("secret_key", "").asString();
     out.exchange.passphrase = exchange.get("passphrase", "").asString();
-    out.exchange.base_url = exchange.get("base_url", "https://www.okx.com").asString();
-    out.exchange.ws_public_url = exchange.get("ws_public_url", "wss://ws.okx.com/ws/v5/public").asString();
-    out.exchange.ws_private_url = exchange.get("ws_private_url", "wss://ws.okx.com/ws/v5/private").asString();
-
-    auto& shm = root["shm"];
-    out.shm.ticker = shm.get("ticker", "/cts_ticker").asString();
-    out.shm.bbo = shm.get("bbo", "/cts_bbo").asString();
-    out.shm.depth = shm.get("depth", "/cts_depth").asString();
-    out.shm.trade = shm.get("trade", "/cts_trade").asString();
-    out.shm.signal = shm.get("signal", "/cts_signal").asString();
-
-    out.log_dir = root.get("log_dir", "logs").asString();
 
     auto& qe = root["quotation_engine"];
     out.quotation_engine.instruments.clear();
