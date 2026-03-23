@@ -1,5 +1,7 @@
 #include "exchange_client.hpp"
 
+#include "common/logger.hpp"
+
 bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy_port) {
     const char* proxy_env = std::getenv("https_proxy");
     if (!proxy_env) {
@@ -98,8 +100,15 @@ void ExchangeClient::Start() {
 
     while (running_) {
         std::string raw;
-        if (!public_ws_.Read(raw)) {
+        if (!public_ws_.ReadWithTimeout(raw, 15)) {
             break;
+        }
+        if (raw.empty()) {
+            public_ws_.Send("ping");
+            continue;
+        }
+        if (raw == "pong") {
+            continue;
         }
         OnPublicMessage(raw);
     }
@@ -112,6 +121,8 @@ void ExchangeClient::Stop() {
 }
 
 void ExchangeClient::LoginPrivate() {
+    running_ = true;
+
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
@@ -135,8 +146,15 @@ void ExchangeClient::LoginPrivate() {
 void ExchangeClient::StartPrivateListener() {
     while (running_) {
         std::string raw;
-        if (!private_ws_.Read(raw)) {
+        if (!private_ws_.ReadWithTimeout(raw, 15)) {
             break;
+        }
+        if (raw.empty()) {
+            private_ws_.Send("ping");
+            continue;
+        }
+        if (raw == "pong") {
+            continue;
         }
         OnPrivateMessage(raw);
     }

@@ -10,12 +10,15 @@
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <vector>
 
 class TradingEngine {
   public:
     TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring);
+    void Init();
     void Run();
     void Stop();
+    const std::vector<ExecutionReport>& GetPendingOrders() const { return pending_orders_; }
 
   private:
     void RunOrderDispatcher();
@@ -28,4 +31,5 @@ class TradingEngine {
     std::unique_ptr<OkxClient> client_;
     PositionManager position_manager_;
     std::atomic<bool> running_{true};
+    std::vector<ExecutionReport> pending_orders_;
 };

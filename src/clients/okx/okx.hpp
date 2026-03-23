@@ -2,10 +2,14 @@
 
 #include "clients/exchange_client.hpp"
 #include "common/config.hpp"
+#include "common/https.hpp"
 #include "common/logger.hpp"
 
 #include <chrono>
+#include <ctime>
+#include <map>
 #include <string>
+#include <vector>
 
 static constexpr const char* OkxPublicWsHost = "ws.okx.com";
 static constexpr const char* OkxPublicWsPort = "443";
@@ -43,6 +47,10 @@ class OkxClient : public ExchangeClient {
     std::string GetPrivateWsPort() override;
     std::string GetPrivateWsPath() override;
 
+  public:
+    std::vector<ExecutionReport> QueryPendingOrders(const std::string& inst_type);
+    std::map<std::string, std::pair<double, double>> QueryBalances();
+
   private:
     void DecodeTicker(const Json::Value& data, const std::string& instId);
     void DecodeBBO(const Json::Value& data, const std::string& instId);
@@ -52,6 +60,7 @@ class OkxClient : public ExchangeClient {
     void DecodeAccountUpdate(const Json::Value& data);
 
     std::string IsoTimestamp() const;
+    std::string IsoTimestampForRest() const;
     std::string Sign(const std::string& timestamp, const std::string& method, const std::string& path) const;
 
     static OrderStatus MapOkxState(const std::string& state);
