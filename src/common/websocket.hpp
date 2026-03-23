@@ -15,7 +15,7 @@
 #include <vector>
 
 class WsClient {
-public:
+  public:
     WsClient() { std::signal(SIGPIPE, SIG_IGN); }
     ~WsClient() { Close(); }
 
@@ -28,13 +28,14 @@ public:
     void Close();
     bool Send(const std::string& payload);
     bool Read(std::string& out);
+    bool ReadWithTimeout(std::string& out, int timeout_sec);
     bool IsOpen() const { return ssl_ != nullptr; }
     static std::string Base64Encode(const unsigned char* data, size_t len);
 
-private:
+  private:
     bool TcpConnect(const std::string& host, const std::string& port);
-    bool ProxyConnect(const std::string& proxy_host, const std::string& proxy_port,
-                      const std::string& target_host, const std::string& target_port);
+    bool ProxyConnect(const std::string& proxy_host, const std::string& proxy_port, const std::string& target_host,
+                      const std::string& target_port);
     bool TlsHandshake(const std::string& host);
     bool WsHandshake(const std::string& host, const std::string& port, const std::string& path);
     bool RawSend(const void* data, size_t len);
@@ -50,7 +51,8 @@ private:
 };
 
 inline bool WsClient::TcpConnect(const std::string& host, const std::string& port) {
-    struct addrinfo hints{}, *result = nullptr;
+    struct addrinfo hints {
+    }, *result = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host.c_str(), port.c_str(), &hints, &result) != 0) {
@@ -77,8 +79,10 @@ inline bool WsClient::ProxyConnect(const std::string& proxy_host, const std::str
     if (!TcpConnect(proxy_host, proxy_port)) {
         return false;
     }
-    std::string req = "CONNECT " + target_host + ":" + target_port + " HTTP/1.1\r\n"
-                      "Host: " + target_host + ":" + target_port + "\r\n\r\n";
+    std::string req = "CONNECT " + target_host + ":" + target_port +
+                      " HTTP/1.1\r\n"
+                      "Host: " +
+                      target_host + ":" + target_port + "\r\n\r\n";
     if (::send(fd_, req.data(), req.size(), 0) <= 0) {
         return false;
     }
@@ -122,6 +126,9 @@ inline bool WsClient::RawSend(const void* data, size_t len) {
 }
 
 inline bool WsClient::RawRecv(void* buf, size_t len) {
+    if (!ssl_) {
+        return false;
+    }
     auto* ptr = static_cast<char*>(buf);
     size_t received = 0;
     while (received < len) {
@@ -162,11 +169,16 @@ inline std::string WsClient::GenerateSecKey() {
 
 inline bool WsClient::WsHandshake(const std::string& host, const std::string& port, const std::string& path) {
     std::string key = GenerateSecKey();
-    std::string req = "GET " + path + " HTTP/1.1\r\n"
-                      "Host: " + host + ":" + port + "\r\n"
+    std::string req = "GET " + path +
+                      " HTTP/1.1\r\n"
+                      "Host: " +
+                      host + ":" + port +
+                      "\r\n"
                       "Upgrade: websocket\r\n"
                       "Connection: Upgrade\r\n"
-                      "Sec-WebSocket-Key: " + key + "\r\n"
+                      "Sec-WebSocket-Key: " +
+                      key +
+                      "\r\n"
                       "Sec-WebSocket-Version: 13\r\n\r\n";
     if (!RawSend(req.data(), req.size())) {
         return false;
@@ -187,7 +199,7 @@ inline bool WsClient::WsHandshake(const std::string& host, const std::string& po
 }
 
 inline bool WsClient::Connect(const std::string& host, const std::string& port, const std::string& path,
-                               const std::string& proxy_host, const std::string& proxy_port) {
+                              const std::string& proxy_host, const std::string& proxy_port) {
     if (!proxy_host.empty()) {
         if (!ProxyConnect(proxy_host, proxy_port, host, port)) {
             return false;
@@ -329,4 +341,31 @@ inline bool WsClient::Read(std::string& out) {
         }
         return true;
     }
+}
+
+inline bool WsClient::ReadWithTimeout(std::string& out, int timeout_sec) {
+    if (fd_ < 0 || !ssl_) {
+        return false;
+    }
+
+    if (SSL_pending(ssl_) > 0) {
+        return Read(out);
+    }
+
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(fd_, &fds);
+    struct timeval tv;
+    tv.tv_sec = timeout_sec;
+    tv.tv_usec = 0;
+
+    int ret = select(fd_ + 1, &fds, nullptr, nullptr, &tv);
+    if (ret < 0) {
+        return false;
+    }
+    if (ret == 0) {
+        out.clear();
+        return true;
+    }
+    return Read(out);
 }

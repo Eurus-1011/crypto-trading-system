@@ -91,7 +91,7 @@ int main(int argc, char* argv[]) {
     INFO("Create all SHM success");
 
     QuotationEngine quotation_engine(config, ticker_ring, bbo_ring, depth_ring, trade_ring);
-    StrategyEngine strategy_engine(config, ticker_ring, signal_ring);
+    StrategyEngine strategy_engine(config, ticker_ring, bbo_ring, depth_ring, trade_ring, signal_ring, report_ring);
     TradingEngine trading_engine(config, signal_ring, report_ring);
 
     g_quotation_engine = &quotation_engine;
@@ -100,6 +100,9 @@ int main(int argc, char* argv[]) {
 
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
+
+    trading_engine.Init();
+    strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
 
     std::thread quotation_thread([&]() { quotation_engine.Run(); });
     std::thread strategy_thread([&]() { strategy_engine.Run(); });

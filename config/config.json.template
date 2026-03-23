@@ -1,23 +1,21 @@
 {
     "exchange": {
         "name": "okx",
-        "api_key": "YOUR_API_KEY",
-        "secret_key": "YOUR_SECRET_KEY",
-        "passphrase": "YOUR_PASSPHRASE"
+        "api_key": "",
+        "secret_key": "",
+        "passphrase": ""
     },
     "quotation_engine": {
-        "instruments": ["BTC-USDT"],
-        "channels": ["tickers", "books5", "bbo-tbt", "trades"],
-        "cpu_affinity": [1, 2]
+        "cpu_affinity": [],
+        "instruments": [],
+        "channels": []
     },
     "strategy_engine": {
-        "name": "buy_once",
-        "instrument": "BTC-USDT",
-        "side": "buy",
-        "size": "10",
-        "cpu_affinity": [3]
+        "cpu_affinity": [],
+        "name": "",
+        "params": {}
     },
     "trading_engine": {
-        "cpu_affinity": [4]
+        "cpu_affinity": []
     }
 }

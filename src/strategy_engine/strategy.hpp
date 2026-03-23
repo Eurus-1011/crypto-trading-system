@@ -1,0 +1,37 @@
+#pragma once
+
+#include "common/quotation.hpp"
+#include "common/trading.hpp"
+#include "common/utils.hpp"
+
+#include <atomic>
+#include <json/json.h>
+#include <string>
+#include <vector>
+
+class Strategy {
+  public:
+    virtual ~Strategy() = default;
+
+    void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
+
+    virtual void Init(const Json::Value& params) = 0;
+    virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
+    virtual void OnTicker(const Ticker& ticker) {}
+    virtual void OnBBO(const BBO& bbo) {}
+    virtual void OnDepth(const Depth& depth) {}
+    virtual void OnTrade(const Trade& trade) {}
+    virtual void OnExecutionReport(const ExecutionReport& report) = 0;
+    virtual void OnTimer() = 0;
+
+    bool IsRunning() const { return running_; }
+    void Stop() { running_ = false; }
+
+  protected:
+    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume);
+    void EmitSell(const char* instrument, OrderType order_type, double price, double volume);
+    void EmitCancel(const char* instrument, const char* order_id);
+
+    SignalRing* signal_ring_ = nullptr;
+    std::atomic<bool> running_{true};
+};

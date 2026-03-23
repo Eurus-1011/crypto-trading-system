@@ -21,9 +21,7 @@ struct QuotationEngineConfig {
 
 struct StrategyEngineConfig {
     std::string name;
-    std::string instrument;
-    std::string side;
-    std::string size;
+    Json::Value params;
     std::vector<int> cpu_affinity;
 };
 
@@ -90,10 +88,8 @@ inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& 
     ParseCpuAffinity(qe, out.quotation_engine.cpu_affinity);
 
     auto& se = root["strategy_engine"];
-    out.strategy_engine.name = se.get("name", "buy_once").asString();
-    out.strategy_engine.instrument = se.get("instrument", "BTC-USDT").asString();
-    out.strategy_engine.side = se.get("side", "buy").asString();
-    out.strategy_engine.size = se.get("size", "10").asString();
+    out.strategy_engine.name = se.get("name", "mesh").asString();
+    out.strategy_engine.params = se.get("params", Json::Value());
     ParseCpuAffinity(se, out.strategy_engine.cpu_affinity);
 
     auto& te = root["trading_engine"];

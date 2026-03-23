@@ -22,7 +22,11 @@ inline double ParseDouble(const Json::Value& val) {
         return val.asDouble();
     }
     if (val.isString()) {
-        return std::stod(val.asString());
+        const std::string& s = val.asString();
+        if (s.empty()) {
+            return 0.0;
+        }
+        return std::stod(s);
     }
     return 0.0;
 }
@@ -32,7 +36,11 @@ inline uint64_t ParseUint64(const Json::Value& val) {
         return val.asUInt64();
     }
     if (val.isString()) {
-        return std::stoull(val.asString());
+        const std::string& s = val.asString();
+        if (s.empty()) {
+            return 0;
+        }
+        return std::stoull(s);
     }
     return 0;
 }
