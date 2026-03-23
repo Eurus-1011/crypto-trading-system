@@ -1,0 +1,91 @@
+#include "trading_engine.hpp"
+
+TradingEngine::TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring)
+    : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {}
+
+void TradingEngine::Run() {
+    if (!config_.trading_engine.cpu_affinity.empty()) {
+        BindThreadToCpus(config_.trading_engine.cpu_affinity);
+    }
+
+    INFO("Start trading engine");
+
+    client_ = std::make_unique<OkxClient>(config_.exchange);
+    client_->LoginPrivate();
+    INFO("Login private ws success");
+
+    client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
+
+    client_->OnBalanceUpdate([this](const std::string& currency, double available) {
+        position_manager_.SyncFromExchange(currency, available);
+    });
+
+    client_->SubscribePrivateChannel(OkxChannelOrders, "SPOT");
+    INFO("Subscribe orders channel success: [INST_TYPE] SPOT");
+
+    client_->SubscribePrivateChannel(OkxChannelAccount, "");
+    INFO("Subscribe account channel success");
+
+    std::thread listener_thread([this]() { RunOrderListener(); });
+
+    RunOrderDispatcher();
+
+    if (listener_thread.joinable()) {
+        listener_thread.join();
+    }
+
+    INFO("Stop trading engine");
+}
+
+void TradingEngine::Stop() { running_ = false; }
+
+void TradingEngine::RunOrderDispatcher() {
+    while (running_) {
+        Signal signal{};
+        if (!shm_pop(signal_ring_, signal)) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            continue;
+        }
+
+        if (signal.action == Action::CANCEL) {
+            client_->SendCancelOrder(signal.instrument, signal.order_id);
+            INFO("Send cancel order: [INSTRUMENT] " + std::string(signal.instrument) + ", [ORDER_ID] " +
+                 std::string(signal.order_id));
+        } else {
+            OrderRequest request;
+            request.instrument = signal.instrument;
+            request.side = (signal.action == Action::BUY) ? Side::BUY : Side::SELL;
+            request.order_type = signal.order_type;
+            request.size = std::to_string(signal.volume);
+            if (signal.order_type == OrderType::LIMIT) {
+                request.price = std::to_string(signal.price);
+            }
+
+            std::string side_str = (request.side == Side::BUY) ? "buy" : "sell";
+            INFO("Send place order: [INSTRUMENT] " + request.instrument + ", [SIDE] " + side_str + ", [SIZE] " +
+                 request.size);
+
+            client_->SendPlaceOrder(request);
+        }
+    }
+}
+
+void TradingEngine::RunOrderListener() { client_->StartPrivateListener(); }
+
+void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
+    shm_push(report_ring_, report);
+
+    if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
+        position_manager_.UpdateOnFill(report);
+        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] filled" +
+             ", [FILLED] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
+             std::to_string(report.avg_fill_price));
+    } else if (report.status == OrderStatus::CANCELLED) {
+        position_manager_.UpdateOnCancel(report);
+        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] cancelled");
+    } else if (report.status == OrderStatus::REJECTED) {
+        ERROR("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] rejected");
+    } else if (report.status == OrderStatus::NEW) {
+        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] new");
+    }
+}

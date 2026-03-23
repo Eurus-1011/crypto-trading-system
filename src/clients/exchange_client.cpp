@@ -34,8 +34,8 @@ bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy
 std::string ExchangeClient::HmacSha256Sign(const std::string& key, const std::string& message) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
-    HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
-         reinterpret_cast<const unsigned char*>(message.data()), message.size(), digest, &digest_len);
+    HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()), reinterpret_cast<const unsigned char*>(message.data()),
+         message.size(), digest, &digest_len);
     return WsClient::Base64Encode(digest, digest_len);
 }
 
@@ -56,6 +56,26 @@ void ExchangeClient::Subscribe(const std::string& channel, const std::string& in
         std::lock_guard<std::mutex> lock(sub_mutex_);
         pending_subs_.push_back({channel, instrument});
     }
+}
+
+void ExchangeClient::SendToPrivate(const std::string& msg) {
+    std::lock_guard<std::mutex> lock(sub_mutex_);
+    private_ws_.Send(msg);
+}
+
+void ExchangeClient::SubscribePrivateChannel(const std::string& channel, const std::string& inst_type) {
+    std::string msg = BuildPrivateSubscribeMessage(channel, inst_type);
+    SendToPrivate(msg);
+}
+
+void ExchangeClient::SendPlaceOrder(const OrderRequest& req) {
+    std::string msg = BuildOrderMessage(req);
+    SendToPrivate(msg);
+}
+
+void ExchangeClient::SendCancelOrder(const std::string& instrument, const std::string& order_id) {
+    std::string msg = BuildCancelOrderMessage(instrument, order_id);
+    SendToPrivate(msg);
 }
 
 void ExchangeClient::Start() {
@@ -112,15 +132,12 @@ void ExchangeClient::LoginPrivate() {
     }
 }
 
-OrderResult ExchangeClient::PlaceOrder(const OrderRequest& req) {
-    std::string order_msg = BuildOrderMessage(req);
-    private_ws_.Send(order_msg);
-    std::string response;
-    if (!private_ws_.Read(response)) {
-        OrderResult fail{};
-        fail.success = false;
-        fail.message = "read failed";
-        return fail;
+void ExchangeClient::StartPrivateListener() {
+    while (running_) {
+        std::string raw;
+        if (!private_ws_.Read(raw)) {
+            break;
+        }
+        OnPrivateMessage(raw);
     }
-    return DecodeOrderResponse(response);
 }

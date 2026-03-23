@@ -33,14 +33,25 @@ std::string OkxClient::BuildUnsubscribeMessage(const std::string& channel, const
     return Json::writeString(writer, msg);
 }
 
+std::string OkxClient::BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) {
+    Json::Value msg;
+    msg["op"] = "subscribe";
+    Json::Value arg;
+    arg["channel"] = channel;
+    arg["instType"] = inst_type;
+    msg["args"].append(arg);
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, msg);
+}
+
 std::string OkxClient::IsoTimestamp() const {
     auto now = std::chrono::system_clock::now();
     auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch());
     return std::to_string(seconds.count());
 }
 
-std::string OkxClient::Sign(const std::string& timestamp, const std::string& method,
-                            const std::string& path) const {
+std::string OkxClient::Sign(const std::string& timestamp, const std::string& method, const std::string& path) const {
     std::string prehash = timestamp + method + path;
     return HmacSha256Sign(config_.secret_key, prehash);
 }
@@ -89,6 +100,36 @@ std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
     return Json::writeString(writer, msg);
 }
 
+std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) {
+    Json::Value msg;
+    msg["id"] = std::to_string(NowNs());
+    msg["op"] = "cancel-order";
+    Json::Value arg;
+    arg["instId"] = instrument;
+    arg["ordId"] = order_id;
+    msg["args"].append(arg);
+
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, msg);
+}
+
+OrderStatus OkxClient::MapOkxState(const std::string& state) {
+    if (state == "filled") {
+        return OrderStatus::FILLED;
+    }
+    if (state == "partially_filled") {
+        return OrderStatus::PARTIALLY_FILLED;
+    }
+    if (state == "canceled") {
+        return OrderStatus::CANCELLED;
+    }
+    if (state == "live") {
+        return OrderStatus::NEW;
+    }
+    return OrderStatus::REJECTED;
+}
+
 void OkxClient::OnPublicMessage(const std::string& raw) {
     Json::Value root = ParseJson(raw);
     if (!root.isMember("arg") || !root.isMember("data")) {
@@ -114,6 +155,53 @@ void OkxClient::OnPublicMessage(const std::string& raw) {
             DecodeTrade(data[idx], instId);
         }
     }
+}
+
+void OkxClient::OnPrivateMessage(const std::string& raw) {
+    Json::Value root = ParseJson(raw);
+
+    if (root.isMember("op")) {
+        return;
+    }
+
+    if (!root.isMember("arg") || !root.isMember("data")) {
+        return;
+    }
+
+    std::string channel = root["arg"].get("channel", "").asString();
+    auto& data = root["data"];
+
+    if (!data.isArray() || data.empty()) {
+        return;
+    }
+
+    if (channel == OkxChannelOrders) {
+        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
+            DecodeOrderUpdate(data[idx]);
+        }
+    } else if (channel == OkxChannelAccount) {
+        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
+            DecodeAccountUpdate(data[idx]);
+        }
+    }
+}
+
+void OkxClient::DecodeOrderUpdate(const Json::Value& data) {
+    if (!on_order_update_) {
+        return;
+    }
+
+    ExecutionReport report{};
+    report.timestamp_ns = NowNs();
+    report.SetInstrument(data.get("instId", "").asString().c_str());
+    report.SetOrderId(data.get("ordId", "").asString().c_str());
+    report.status = MapOkxState(data.get("state", "").asString());
+    report.side = (data.get("side", "buy").asString() == "buy") ? Side::BUY : Side::SELL;
+    report.price = ParseDouble(data["px"]);
+    report.filled_volume = ParseDouble(data["accFillSz"]);
+    report.total_volume = ParseDouble(data["sz"]);
+    report.avg_fill_price = ParseDouble(data["avgPx"]);
+    on_order_update_(report);
 }
 
 void OkxClient::DecodeTicker(const Json::Value& data, const std::string& instId) {
@@ -207,6 +295,21 @@ void OkxClient::DecodeTrade(const Json::Value& data, const std::string& instId) 
     trade.volume = ParseDouble(data["sz"]);
     trade.side = (data.get("side", "buy").asString() == "buy") ? TradeSide::BUY : TradeSide::SELL;
     on_trade_(trade);
+}
+
+void OkxClient::DecodeAccountUpdate(const Json::Value& data) {
+    if (!on_balance_update_) {
+        return;
+    }
+    auto& details = data["details"];
+    if (!details.isArray()) {
+        return;
+    }
+    for (Json::ArrayIndex idx = 0; idx < details.size(); ++idx) {
+        std::string currency = details[idx].get("ccy", "").asString();
+        double available = ParseDouble(details[idx]["availBal"]);
+        on_balance_update_(currency, available);
+    }
 }
 
 OrderResult OkxClient::DecodeOrderResponse(const std::string& raw) {
