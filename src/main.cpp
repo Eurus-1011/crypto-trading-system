@@ -82,8 +82,9 @@ int main(int argc, char* argv[]) {
     auto* depth_ring = shm_create<Depth, 2048>(SHM_DEPTH);
     auto* trade_ring = shm_create<Trade, 8192>(SHM_TRADE);
     auto* signal_ring = shm_create<Signal, 1024>(SHM_SIGNAL);
+    auto* report_ring = shm_create<ExecutionReport, 4096>(SHM_EXECUTION_REPORT);
 
-    if (!ticker_ring || !bbo_ring || !depth_ring || !trade_ring || !signal_ring) {
+    if (!ticker_ring || !bbo_ring || !depth_ring || !trade_ring || !signal_ring || !report_ring) {
         ERROR("Create SHM failed");
         return 1;
     }
@@ -91,7 +92,7 @@ int main(int argc, char* argv[]) {
 
     QuotationEngine quotation_engine(config, ticker_ring, bbo_ring, depth_ring, trade_ring);
     StrategyEngine strategy_engine(config, ticker_ring, signal_ring);
-    TradingEngine trading_engine(config, signal_ring);
+    TradingEngine trading_engine(config, signal_ring, report_ring);
 
     g_quotation_engine = &quotation_engine;
     g_strategy_engine = &strategy_engine;
@@ -117,6 +118,7 @@ int main(int argc, char* argv[]) {
     shm_destroy(SHM_DEPTH, depth_ring);
     shm_destroy(SHM_TRADE, trade_ring);
     shm_destroy(SHM_SIGNAL, signal_ring);
+    shm_destroy(SHM_EXECUTION_REPORT, report_ring);
 
     INFO("System shutdown complete");
     return 0;

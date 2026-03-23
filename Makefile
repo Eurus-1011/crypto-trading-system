@@ -1,4 +1,4 @@
-.PHONY: all build clean test setup
+.PHONY: all build clean setup
 
 all: build
 
@@ -11,6 +11,3 @@ build:
 
 clean:
 	@rm -rf build/
-
-test:
-	@cd build && ./okx_integration_test
