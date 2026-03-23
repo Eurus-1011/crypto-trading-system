@@ -16,7 +16,7 @@
 #include <vector>
 
 class ExchangeClient {
-public:
+  public:
     virtual ~ExchangeClient() = default;
     ExchangeClient(const ExchangeClient&) = delete;
     ExchangeClient& operator=(const ExchangeClient&) = delete;
@@ -25,15 +25,21 @@ public:
     void OnBBO(std::function<void(const BBO&)> cb) { on_bbo_ = std::move(cb); }
     void OnDepth(std::function<void(const Depth&)> cb) { on_depth_ = std::move(cb); }
     void OnTrade(std::function<void(const Trade&)> cb) { on_trade_ = std::move(cb); }
+    void OnOrderUpdate(std::function<void(const ExecutionReport&)> cb) { on_order_update_ = std::move(cb); }
+    void OnBalanceUpdate(std::function<void(const std::string&, double)> cb) { on_balance_update_ = std::move(cb); }
 
     void Subscribe(const std::string& channel, const std::string& instrument);
-    OrderResult PlaceOrder(const OrderRequest& req);
+    void SendToPrivate(const std::string& msg);
+    void SubscribePrivateChannel(const std::string& channel, const std::string& inst_type);
+    void SendPlaceOrder(const OrderRequest& req);
+    void SendCancelOrder(const std::string& instrument, const std::string& order_id);
 
     void Start();
     void Stop();
     void LoginPrivate();
+    void StartPrivateListener();
 
-protected:
+  protected:
     ExchangeClient() = default;
 
     static std::string HmacSha256Sign(const std::string& key, const std::string& message);
@@ -42,9 +48,12 @@ protected:
 
     virtual std::string BuildSubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
     virtual std::string BuildUnsubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
+    virtual std::string BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) = 0;
     virtual std::string BuildLoginMessage() = 0;
     virtual std::string BuildOrderMessage(const OrderRequest& req) = 0;
+    virtual std::string BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) = 0;
     virtual void OnPublicMessage(const std::string& raw) = 0;
+    virtual void OnPrivateMessage(const std::string& raw) = 0;
     virtual OrderResult DecodeOrderResponse(const std::string& raw) = 0;
 
     virtual std::string GetPublicWsHost() = 0;
@@ -59,9 +68,11 @@ protected:
     std::atomic<bool> running_{false};
 
     std::function<void(const Ticker&)> on_ticker_;
-    std::function<void(const BBO&)>    on_bbo_;
-    std::function<void(const Depth&)>  on_depth_;
-    std::function<void(const Trade&)>  on_trade_;
+    std::function<void(const BBO&)> on_bbo_;
+    std::function<void(const Depth&)> on_depth_;
+    std::function<void(const Trade&)> on_trade_;
+    std::function<void(const ExecutionReport&)> on_order_update_;
+    std::function<void(const std::string&, double)> on_balance_update_;
 
     struct PendingSub {
         std::string channel;
