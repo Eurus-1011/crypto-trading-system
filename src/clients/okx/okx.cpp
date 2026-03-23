@@ -51,6 +51,17 @@ std::string OkxClient::IsoTimestamp() const {
     return std::to_string(seconds.count());
 }
 
+std::string OkxClient::IsoTimestampForRest() const {
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::time_t time = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+    gmtime_r(&time, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm);
+    return std::string(buf) + "." + std::to_string(ms.count()) + "Z";
+}
+
 std::string OkxClient::Sign(const std::string& timestamp, const std::string& method, const std::string& path) const {
     std::string prehash = timestamp + method + path;
     return HmacSha256Sign(config_.secret_key, prehash);
@@ -114,6 +125,126 @@ std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, co
     return Json::writeString(writer, msg);
 }
 
+std::vector<ExecutionReport> OkxClient::QueryPendingOrders(const std::string& inst_type) {
+    std::vector<ExecutionReport> result;
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    std::string after_cursor;
+    while (true) {
+        std::string path = "/api/v5/trade/orders-pending?instType=" + inst_type;
+        if (!after_cursor.empty()) {
+            path += "&after=" + after_cursor;
+        }
+
+        std::string timestamp = IsoTimestampForRest();
+        std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
+        std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
+                              "\r\n"
+                              "OK-ACCESS-SIGN: " +
+                              signature +
+                              "\r\n"
+                              "OK-ACCESS-TIMESTAMP: " +
+                              timestamp +
+                              "\r\n"
+                              "OK-ACCESS-PASSPHRASE: " +
+                              config_.passphrase + "\r\n";
+
+        std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, headers, "", proxy_host, proxy_port);
+        if (raw_body.empty()) {
+            WARN("Query pending orders failed");
+            break;
+        }
+
+        auto json_start = raw_body.find('{');
+        if (json_start == std::string::npos) {
+            WARN("Query pending orders: invalid response");
+            break;
+        }
+
+        Json::Value root = ParseJson(raw_body.substr(json_start));
+        if (root.get("code", "-1").asString() != "0") {
+            WARN("Query pending orders error: [MSG] " + root.get("msg", "").asString());
+            break;
+        }
+
+        auto& data = root["data"];
+        if (!data.isArray() || data.empty()) {
+            break;
+        }
+
+        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
+            ExecutionReport report{};
+            report.timestamp_ns = NowNs();
+            report.SetInstrument(data[idx].get("instId", "").asString().c_str());
+            report.SetOrderId(data[idx].get("ordId", "").asString().c_str());
+            report.status = MapOkxState(data[idx].get("state", "").asString());
+            report.side = (data[idx].get("side", "buy").asString() == "buy") ? Side::BUY : Side::SELL;
+            report.price = ParseDouble(data[idx]["px"]);
+            report.filled_volume = ParseDouble(data[idx]["accFillSz"]);
+            report.total_volume = ParseDouble(data[idx]["sz"]);
+            report.avg_fill_price = ParseDouble(data[idx]["avgPx"]);
+            result.push_back(report);
+        }
+
+        if (data.size() < 100) {
+            break;
+        }
+        after_cursor = data[data.size() - 1].get("ordId", "").asString();
+    }
+
+    INFO("Query pending orders complete: [COUNT] " + std::to_string(result.size()));
+    return result;
+}
+
+std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    std::string path = "/api/v5/account/balance";
+    std::string timestamp = IsoTimestampForRest();
+    std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
+    std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
+                          "\r\n"
+                          "OK-ACCESS-SIGN: " +
+                          signature +
+                          "\r\n"
+                          "OK-ACCESS-TIMESTAMP: " +
+                          timestamp +
+                          "\r\n"
+                          "OK-ACCESS-PASSPHRASE: " +
+                          config_.passphrase + "\r\n";
+
+    std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, headers, "", proxy_host, proxy_port);
+    std::map<std::string, std::pair<double, double>> result;
+    if (raw_body.empty()) {
+        return result;
+    }
+
+    auto json_start = raw_body.find('{');
+    if (json_start == std::string::npos) {
+        return result;
+    }
+
+    Json::Value root = ParseJson(raw_body.substr(json_start));
+    if (root.get("code", "-1").asString() != "0" || !root["data"].isArray() || root["data"].empty()) {
+        return result;
+    }
+
+    auto& details = root["data"][0]["details"];
+    if (details.isArray()) {
+        for (Json::ArrayIndex idx = 0; idx < details.size(); ++idx) {
+            std::string currency = details[idx].get("ccy", "").asString();
+            double available = ParseDouble(details[idx]["availBal"]);
+            double frozen = ParseDouble(details[idx]["frozenBal"]);
+            if (available > 0 || frozen > 0) {
+                result[currency] = {available, frozen};
+            }
+        }
+    }
+    return result;
+}
+
 OrderStatus OkxClient::MapOkxState(const std::string& state) {
     if (state == "filled") {
         return OrderStatus::FILLED;
@@ -160,7 +291,20 @@ void OkxClient::OnPublicMessage(const std::string& raw) {
 void OkxClient::OnPrivateMessage(const std::string& raw) {
     Json::Value root = ParseJson(raw);
 
+    if (root.isMember("event")) {
+        return;
+    }
+
     if (root.isMember("op")) {
+        std::string code = root.get("code", "").asString();
+        if (code != "0") {
+            std::string op = root.get("op", "").asString();
+            std::string msg = root.get("msg", "").asString();
+            if (root["data"].isArray() && !root["data"].empty()) {
+                msg = root["data"][0].get("sMsg", msg).asString();
+            }
+            ERROR("Private ws op failed: [OP] " + op + ", [CODE] " + code + ", [MSG] " + msg);
+        }
         return;
     }
 
@@ -308,7 +452,8 @@ void OkxClient::DecodeAccountUpdate(const Json::Value& data) {
     for (Json::ArrayIndex idx = 0; idx < details.size(); ++idx) {
         std::string currency = details[idx].get("ccy", "").asString();
         double available = ParseDouble(details[idx]["availBal"]);
-        on_balance_update_(currency, available);
+        double frozen = ParseDouble(details[idx]["frozenBal"]);
+        on_balance_update_(currency, available, frozen);
     }
 }
 

@@ -3,22 +3,25 @@
 TradingEngine::TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring)
     : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {}
 
-void TradingEngine::Run() {
-    if (!config_.trading_engine.cpu_affinity.empty()) {
-        BindThreadToCpus(config_.trading_engine.cpu_affinity);
-    }
-
-    INFO("Start trading engine");
+void TradingEngine::Init() {
+    INFO("Start trading engine init");
 
     client_ = std::make_unique<OkxClient>(config_.exchange);
     client_->LoginPrivate();
     INFO("Login private ws success");
 
+    auto balances = client_->QueryBalances();
+    position_manager_.InitFromExchange(balances);
+
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
 
-    client_->OnBalanceUpdate([this](const std::string& currency, double available) {
-        position_manager_.SyncFromExchange(currency, available);
+    client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen) {
+        position_manager_.SyncFromExchange(currency, available, frozen);
     });
+
+    std::thread listener_thread([this]() { RunOrderListener(); });
+    listener_thread.detach();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     client_->SubscribePrivateChannel(OkxChannelOrders, "SPOT");
     INFO("Subscribe orders channel success: [INST_TYPE] SPOT");
@@ -26,14 +29,17 @@ void TradingEngine::Run() {
     client_->SubscribePrivateChannel(OkxChannelAccount, "");
     INFO("Subscribe account channel success");
 
-    std::thread listener_thread([this]() { RunOrderListener(); });
+    pending_orders_ = client_->QueryPendingOrders("SPOT");
 
-    RunOrderDispatcher();
+    INFO("Trading engine init complete");
+}
 
-    if (listener_thread.joinable()) {
-        listener_thread.join();
+void TradingEngine::Run() {
+    if (!config_.trading_engine.cpu_affinity.empty()) {
+        BindThreadToCpus(config_.trading_engine.cpu_affinity);
     }
 
+    RunOrderDispatcher();
     INFO("Stop trading engine");
 }
 
@@ -86,6 +92,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     } else if (report.status == OrderStatus::REJECTED) {
         ERROR("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] rejected");
     } else if (report.status == OrderStatus::NEW) {
+        position_manager_.UpdateOnNew(report);
         INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] new");
     }
 }
