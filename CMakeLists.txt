@@ -12,7 +12,6 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 find_package(OpenSSL REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
 
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
@@ -28,7 +27,6 @@ target_link_libraries(exchange_client PUBLIC
     ${JSONCPP_LIBRARIES}
     OpenSSL::Crypto
     OpenSSL::SSL
-    Boost::system
     pthread
 )
 

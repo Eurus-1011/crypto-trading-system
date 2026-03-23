@@ -3,37 +3,20 @@
 #include "common/quotation.hpp"
 #include "common/trading.hpp"
 #include "common/utils.hpp"
+#include "common/websocket.hpp"
 
 #include <atomic>
-#include <boost/asio/connect.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/read.hpp>
-#include <boost/asio/write.hpp>
-#include <boost/asio/ssl/stream.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/ssl.hpp>
-#include <boost/beast/websocket.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/beast/websocket/ssl.hpp>
+#include <cstdlib>
 #include <functional>
 #include <json/json.h>
-#include <memory>
 #include <mutex>
-#include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <sstream>
 #include <string>
 #include <vector>
 
-namespace beast = boost::beast;
-namespace websocket = beast::websocket;
-namespace net = boost::asio;
-namespace ssl = net::ssl;
-using tcp = net::ip::tcp;
-
 class ExchangeClient {
 public:
-    using WsStream = websocket::stream<beast::ssl_stream<beast::tcp_stream>>;
-
     virtual ~ExchangeClient() = default;
     ExchangeClient(const ExchangeClient&) = delete;
     ExchangeClient& operator=(const ExchangeClient&) = delete;
@@ -53,29 +36,9 @@ public:
 protected:
     ExchangeClient() = default;
 
-    struct WsConnection {
-        net::io_context ioc;
-        ssl::context ssl_ctx{ssl::context::tlsv12_client};
-        std::unique_ptr<WsStream> stream;
-        beast::flat_buffer read_buf;
-        std::mutex send_mutex;
-
-        WsConnection() {
-            ssl_ctx.set_default_verify_paths();
-            ssl_ctx.set_verify_mode(ssl::verify_none);
-        }
-    };
-
-    void WsConnect(WsConnection& conn, const std::string& host, const std::string& port,
-                   const std::string& path);
-    static bool DetectHttpProxy(std::string& proxy_host, std::string& proxy_port);
-    void WsSend(WsConnection& conn, const std::string& msg);
-    std::string WsRead(WsConnection& conn);
-    void WsClose(WsConnection& conn);
-
-    static std::string Base64Encode(const unsigned char* data, int len);
     static std::string HmacSha256Sign(const std::string& key, const std::string& message);
     static Json::Value ParseJson(const std::string& raw);
+    static bool DetectHttpProxy(std::string& proxy_host, std::string& proxy_port);
 
     virtual std::string BuildSubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
     virtual std::string BuildUnsubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
@@ -91,8 +54,8 @@ protected:
     virtual std::string GetPrivateWsPort() = 0;
     virtual std::string GetPrivateWsPath() = 0;
 
-    WsConnection public_ws_;
-    WsConnection private_ws_;
+    WsClient public_ws_;
+    WsClient private_ws_;
     std::atomic<bool> running_{false};
 
     std::function<void(const Ticker&)> on_ticker_;
