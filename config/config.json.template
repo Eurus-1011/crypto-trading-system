@@ -3,27 +3,21 @@
         "name": "okx",
         "api_key": "YOUR_API_KEY",
         "secret_key": "YOUR_SECRET_KEY",
-        "passphrase": "YOUR_PASSPHRASE",
-        "base_url": "https://www.okx.com",
-        "ws_public_url": "wss://ws.okx.com/ws/v5/public",
-        "ws_private_url": "wss://ws.okx.com/ws/v5/private"
+        "passphrase": "YOUR_PASSPHRASE"
     },
-    "market": {
+    "quotation_engine": {
         "instruments": ["BTC-USDT"],
-        "channels": ["tickers", "books5", "bbo-tbt", "trades"]
+        "channels": ["tickers", "books5", "bbo-tbt", "trades"],
+        "cpu_affinity": [1, 2]
     },
-    "strategy": {
+    "strategy_engine": {
         "name": "buy_once",
         "instrument": "BTC-USDT",
         "side": "buy",
-        "size": "10"
+        "size": "10",
+        "cpu_affinity": [3]
     },
-    "shm": {
-        "ticker": "/cts_ticker",
-        "bbo": "/cts_bbo",
-        "depth": "/cts_depth",
-        "trade": "/cts_trade",
-        "signal": "/cts_signal"
-    },
-    "log_dir": "logs"
+    "trading_engine": {
+        "cpu_affinity": [4]
+    }
 }
