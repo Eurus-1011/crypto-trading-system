@@ -6,8 +6,6 @@
 #include <mutex>
 #include <string>
 
-namespace cts {
-
 enum LogLevel { kInfo = 0, kWarning = 1, kError = 2 };
 
 static constexpr const char* kLevelStr[] = {"INFO", "WARN", "ERROR"};
@@ -52,5 +50,3 @@ inline void InitLog(const std::string& path) {
 inline void LOG_INFO(const std::string& msg) { GetLogPtr()->log(kInfo, msg); }
 inline void LOG_WARN(const std::string& msg) { GetLogPtr()->log(kWarning, msg); }
 inline void LOG_ERROR(const std::string& msg) { GetLogPtr()->log(kError, msg); }
-
-} // namespace cts

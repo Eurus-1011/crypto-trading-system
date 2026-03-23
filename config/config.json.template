@@ -5,11 +5,12 @@
         "secret_key": "YOUR_SECRET_KEY",
         "passphrase": "YOUR_PASSPHRASE",
         "base_url": "https://www.okx.com",
-        "simulated": true
+        "ws_public_url": "wss://ws.okx.com/ws/v5/public",
+        "ws_private_url": "wss://ws.okx.com/ws/v5/private"
     },
     "market": {
         "instruments": ["BTC-USDT"],
-        "poll_interval_ms": 200
+        "channels": ["tickers", "books5", "bbo-tbt", "trades"]
     },
     "strategy": {
         "name": "buy_once",
@@ -18,7 +19,10 @@
         "size": "10"
     },
     "shm": {
-        "market_data": "/cts_market_data",
+        "ticker": "/cts_ticker",
+        "bbo": "/cts_bbo",
+        "depth": "/cts_depth",
+        "trade": "/cts_trade",
         "signal": "/cts_signal"
     },
     "log_dir": "logs"

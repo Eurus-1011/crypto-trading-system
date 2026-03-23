@@ -9,42 +9,46 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Dependencies
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JSONCPP REQUIRED jsoncpp)
-find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-set(COMMON_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/src/include)
+set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
-# OKX client library
-add_library(okx_client STATIC
-    src/client/okx/okx_client.cpp
+add_library(exchange_client STATIC
+    src/clients/exchange_client.cpp
+    src/clients/okx/okx.cpp
 )
-target_include_directories(okx_client PUBLIC
-    ${COMMON_INCLUDE_DIR}
+target_include_directories(exchange_client PUBLIC
+    ${SRC_DIR}
     ${JSONCPP_INCLUDE_DIRS}
 )
-target_link_libraries(okx_client PUBLIC
+target_link_libraries(exchange_client PUBLIC
     ${JSONCPP_LIBRARIES}
-    CURL::libcurl
     OpenSSL::Crypto
+    OpenSSL::SSL
+    pthread
 )
 
-# market_engine
-add_executable(market_engine src/market_engine/main.cpp)
-target_include_directories(market_engine PRIVATE ${COMMON_INCLUDE_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(market_engine PRIVATE okx_client rt)
-target_compile_options(market_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+add_executable(quote_engine src/quote_engine/main.cpp)
+target_include_directories(quote_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_link_libraries(quote_engine PRIVATE exchange_client rt)
+target_compile_options(quote_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
 
-# strategy_engine
 add_executable(strategy_engine src/strategy_engine/main.cpp)
-target_include_directories(strategy_engine PRIVATE ${COMMON_INCLUDE_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_include_directories(strategy_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
 target_link_libraries(strategy_engine PRIVATE ${JSONCPP_LIBRARIES} rt)
 target_compile_options(strategy_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
 
-# trading_engine
 add_executable(trading_engine src/trading_engine/main.cpp)
-target_include_directories(trading_engine PRIVATE ${COMMON_INCLUDE_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(trading_engine PRIVATE okx_client rt)
+target_include_directories(trading_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_link_libraries(trading_engine PRIVATE exchange_client rt)
 target_compile_options(trading_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+
+enable_testing()
+find_package(GTest REQUIRED)
+
+add_executable(okx_integration_test integration_test/clients/okx/okx_integration_test.cpp)
+target_include_directories(okx_integration_test PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_link_libraries(okx_integration_test PRIVATE exchange_client GTest::GTest GTest::Main rt)
+add_test(NAME okx_integration_test COMMAND okx_integration_test)
