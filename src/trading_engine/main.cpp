@@ -1,74 +1,75 @@
-#include "client/okx/okx_client.hpp"
+#include "clients/okx/okx.hpp"
 #include "common/config.hpp"
 #include "common/logger.hpp"
-#include "common/types.hpp"
+#include "common/trading.hpp"
 
 #include <csignal>
 #include <iostream>
 #include <thread>
 
 static volatile sig_atomic_t g_running = 1;
-static void on_signal(int) { g_running = 0; }
+static void OnSignal(int) { g_running = 0; }
 
 int main(int argc, char* argv[]) {
     std::string config_path = (argc > 1) ? argv[1] : "config/config.json";
 
-    cts::SystemConfig cfg;
+    SystemConfig cfg;
     std::string err;
-    if (!cts::LoadConfig(config_path, cfg, err)) {
+    if (!LoadConfig(config_path, cfg, err)) {
         std::cerr << "config error: " << err << std::endl;
         return 1;
     }
 
-    cts::InitLog(cfg.log_dir + "/trading_engine.log");
-    cts::LOG_INFO("trading_engine starting");
+    InitLog(cfg.log_dir + "/trading_engine.log");
+    LOG_INFO("trading_engine starting");
 
-    cts::SignalRing* sig_ring = nullptr;
+    SignalRing* signal_ring = nullptr;
     for (int retry = 0; retry < 30 && g_running; ++retry) {
-        sig_ring = cts::shm_attach<cts::Signal, cts::SIGNAL_SHM_CAPACITY>(cfg.shm.signal.c_str());
-        if (sig_ring) break;
-        cts::LOG_WARN("waiting for signal shm...");
+        signal_ring = shm_attach<Signal, 1024>(cfg.shm.signal.c_str());
+        if (signal_ring) {
+            break;
+        }
+        LOG_WARN("waiting for signal shm...");
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    if (!sig_ring) {
-        cts::LOG_ERROR("failed to attach signal shm");
+    if (!signal_ring) {
+        LOG_ERROR("failed to attach signal shm");
         return 1;
     }
-    cts::LOG_INFO("shm attached: " + cfg.shm.signal);
 
-    cts::OkxClient client(cfg.exchange.api_key, cfg.exchange.secret_key, cfg.exchange.passphrase,
-                          cfg.exchange.base_url, cfg.exchange.simulated);
+    OkxClient client(cfg.exchange);
+    client.LoginPrivate();
+    LOG_INFO("private ws connected and logged in");
 
-    std::signal(SIGINT, on_signal);
-    std::signal(SIGTERM, on_signal);
+    std::signal(SIGINT, OnSignal);
+    std::signal(SIGTERM, OnSignal);
 
     while (g_running) {
-        cts::Signal sig{};
-        if (!cts::shm_pop(sig_ring, sig)) {
+        Signal signal{};
+        if (!shm_pop(signal_ring, signal)) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
             continue;
         }
 
-        std::string side = (sig.side == cts::Side::BUY) ? "buy" : "sell";
-        std::string ord_type = (sig.order_type == cts::OrderType::MARKET) ? "market" : "limit";
-        std::string size = std::to_string(sig.quantity);
+        OrderRequest request;
+        request.instrument = signal.instrument;
+        request.side = signal.side;
+        request.order_type = signal.order_type;
+        request.size = std::to_string(signal.volume);
 
-        cts::LOG_INFO("executing: " + std::string(sig.instrument) + " " + side + " " + ord_type + " sz=" + size);
+        std::string side_str = (request.side == Side::BUY) ? "buy" : "sell";
+        LOG_INFO("executing: " + request.instrument + " " + side_str + " sz=" + request.size);
 
-        Json::Value resp = client.place_order(sig.instrument, side, ord_type, size);
+        OrderResult result = client.PlaceOrder(request);
 
-        std::string code = resp.get("code", "-1").asString();
-        if (code == "0") {
-            auto& data = resp["data"][0];
-            cts::LOG_INFO("order placed: ordId=" + data.get("ordId", "?").asString() +
-                          " sCode=" + data.get("sCode", "?").asString() +
-                          " sMsg=" + data.get("sMsg", "").asString());
+        if (result.success) {
+            LOG_INFO("order placed: ordId=" + result.order_id + " msg=" + result.message);
         } else {
-            cts::LOG_ERROR("order failed: code=" + code + " msg=" + resp.get("msg", "unknown").asString());
+            LOG_ERROR("order failed: code=" + result.code + " msg=" + result.message);
         }
     }
 
-    cts::LOG_INFO("trading_engine stopping");
-    cts::shm_detach(sig_ring);
+    LOG_INFO("trading_engine stopping");
+    shm_detach(signal_ring);
     return 0;
 }

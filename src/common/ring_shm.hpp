@@ -6,8 +6,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-namespace cts {
-
 template <typename EntryT, size_t Capacity = 4096>
 struct RingShm {
     std::atomic<uint64_t> head{0};
@@ -84,5 +82,3 @@ inline bool shm_pop(RingShm<EntryT, Capacity>* r, EntryT& e) {
     e = r->entries[slot % Capacity];
     return true;
 }
-
-} // namespace cts
