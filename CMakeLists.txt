@@ -30,20 +30,10 @@ target_link_libraries(exchange_client PUBLIC
     pthread
 )
 
-add_executable(quote_engine src/quote_engine/main.cpp)
-target_include_directories(quote_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(quote_engine PRIVATE exchange_client rt)
-target_compile_options(quote_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
-
-add_executable(strategy_engine src/strategy_engine/main.cpp)
-target_include_directories(strategy_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(strategy_engine PRIVATE ${JSONCPP_LIBRARIES} rt)
-target_compile_options(strategy_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
-
-add_executable(trading_engine src/trading_engine/main.cpp)
-target_include_directories(trading_engine PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(trading_engine PRIVATE exchange_client rt)
-target_compile_options(trading_engine PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+add_executable(crypto-trading-system src/main.cpp)
+target_include_directories(crypto-trading-system PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_link_libraries(crypto-trading-system PRIVATE exchange_client rt)
+target_compile_options(crypto-trading-system PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
 
 enable_testing()
 find_package(GTest REQUIRED)

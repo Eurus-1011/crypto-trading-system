@@ -11,11 +11,12 @@ enum LogLevel { kInfo = 0, kWarning = 1, kError = 2 };
 static constexpr const char* kLevelStr[] = {"INFO", "WARN", "ERROR"};
 
 class Logger {
-public:
+  public:
     explicit Logger(const std::string& path) : fp_(std::fopen(path.c_str(), "a")) { assert(fp_); }
 
     ~Logger() {
-        if (fp_) std::fclose(fp_);
+        if (fp_)
+            std::fclose(fp_);
     }
 
     void log(LogLevel level, const char* msg) {
@@ -31,7 +32,7 @@ public:
 
     void log(LogLevel level, const std::string& msg) { log(level, msg.c_str()); }
 
-private:
+  private:
     std::FILE* fp_;
     std::mutex mutex_;
 };
@@ -43,10 +44,11 @@ inline Logger*& GetLogPtr() {
 
 inline void InitLog(const std::string& path) {
     Logger*& p = GetLogPtr();
-    if (p) delete p;
+    if (p)
+        delete p;
     p = new Logger(path);
 }
 
-inline void LOG_INFO(const std::string& msg) { GetLogPtr()->log(kInfo, msg); }
-inline void LOG_WARN(const std::string& msg) { GetLogPtr()->log(kWarning, msg); }
-inline void LOG_ERROR(const std::string& msg) { GetLogPtr()->log(kError, msg); }
+inline void INFO(const std::string& msg) { GetLogPtr()->log(kInfo, msg); }
+inline void WARN(const std::string& msg) { GetLogPtr()->log(kWarning, msg); }
+inline void ERROR(const std::string& msg) { GetLogPtr()->log(kError, msg); }
