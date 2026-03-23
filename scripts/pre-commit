@@ -1,0 +1,27 @@
+#!/bin/bash
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|hpp|h|cc|cxx)$')
+
+if [ -z "$STAGED_FILES" ]; then
+    exit 0
+fi
+
+if ! command -v clang-format &> /dev/null; then
+    echo "ERROR: clang-format not found, install it first."
+    exit 1
+fi
+
+NEEDS_FORMAT=0
+for FILE in $STAGED_FILES; do
+    if ! clang-format --dry-run --Werror "$FILE" &> /dev/null; then
+        clang-format -i "$FILE"
+        git add "$FILE"
+        NEEDS_FORMAT=1
+    fi
+done
+
+if [ "$NEEDS_FORMAT" -eq 1 ]; then
+    echo "clang-format: auto-formatted staged files."
+fi
+
+exit 0
