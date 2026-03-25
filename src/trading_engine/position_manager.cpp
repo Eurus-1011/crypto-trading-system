@@ -10,7 +10,7 @@ void PositionManager::InitFromExchange(const std::map<std::string, std::pair<dou
         pos.frozen = bal.second;
         positions_[currency] = pos;
         INFO("Init position: [CURRENCY] " + currency + ", [AVAILABLE] " + std::to_string(pos.available) +
-             ", [FROZEN] " + std::to_string(pos.frozen));
+             ", [TOTAL_FROZEN] " + std::to_string(pos.frozen));
     }
 }
 
@@ -40,8 +40,9 @@ void PositionManager::UpdateOnNew(const ExecutionReport& report) {
         double freeze_amount = report.price * report.total_volume;
         quote_pos.available -= freeze_amount;
         quote_pos.frozen += freeze_amount;
-        INFO("Freeze on new order: [CURRENCY] " + quote_currency + ", [AMOUNT] " + std::to_string(freeze_amount) +
-             ", [AVAILABLE] " + std::to_string(quote_pos.available) + ", [FROZEN] " + std::to_string(quote_pos.frozen));
+        INFO("Freeze on new order: [CURRENCY] " + quote_currency + ", [FROZEN] " + std::to_string(freeze_amount) +
+             ", [AVAILABLE] " + std::to_string(quote_pos.available) + ", [TOTAL_FROZEN] " +
+             std::to_string(quote_pos.frozen));
     } else {
         std::string base_currency = ExtractBaseCurrency(report.instrument);
         auto& base_pos = positions_[base_currency];
@@ -49,8 +50,9 @@ void PositionManager::UpdateOnNew(const ExecutionReport& report) {
         double freeze_amount = report.total_volume;
         base_pos.available -= freeze_amount;
         base_pos.frozen += freeze_amount;
-        INFO("Freeze on new order: [CURRENCY] " + base_currency + ", [AMOUNT] " + std::to_string(freeze_amount) +
-             ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [FROZEN] " + std::to_string(base_pos.frozen));
+        INFO("Freeze on new order: [CURRENCY] " + base_currency + ", [FROZEN] " + std::to_string(freeze_amount) +
+             ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [TOTAL_FROZEN] " +
+             std::to_string(base_pos.frozen));
     }
 }
 
@@ -68,9 +70,9 @@ void PositionManager::UpdateOnFill(const ExecutionReport& report) {
             base_pos.frozen -= report.filled_volume;
         }
 
-        INFO("Update position on fill: [CURRENCY] " + base_currency + ", [AVAILABLE] " +
-             std::to_string(base_pos.available) + ", [FROZEN] " + std::to_string(base_pos.frozen) + ", [SIDE] " +
-             std::string(report.side == Side::BUY ? "buy" : "sell"));
+        INFO("Update position on fill: [CURRENCY] " + base_currency + ", [SIDE] " + ToString(report.side) +
+             ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [TOTAL_FROZEN] " +
+             std::to_string(base_pos.frozen));
     }
 }
 
@@ -86,18 +88,18 @@ void PositionManager::UpdateOnCancel(const ExecutionReport& report) {
                 double release_amount = remaining * report.price;
                 quote_pos.frozen -= release_amount;
                 quote_pos.available += release_amount;
-                INFO("Release frozen on cancel: [CURRENCY] " + quote_currency + ", [AMOUNT] " +
+                INFO("Release frozen on cancel: [CURRENCY] " + quote_currency + ", [RELEASED] " +
                      std::to_string(release_amount) + ", [AVAILABLE] " + std::to_string(quote_pos.available) +
-                     ", [FROZEN] " + std::to_string(quote_pos.frozen));
+                     ", [TOTAL_FROZEN] " + std::to_string(quote_pos.frozen));
             } else {
                 std::string base_currency = ExtractBaseCurrency(report.instrument);
                 auto& base_pos = positions_[base_currency];
                 base_pos.currency = base_currency;
                 base_pos.frozen -= remaining;
                 base_pos.available += remaining;
-                INFO("Release frozen on cancel: [CURRENCY] " + base_currency + ", [AMOUNT] " +
-                     std::to_string(remaining) + ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [FROZEN] " +
-                     std::to_string(base_pos.frozen));
+                INFO("Release frozen on cancel: [CURRENCY] " + base_currency + ", [RELEASED] " +
+                     std::to_string(remaining) + ", [AVAILABLE] " + std::to_string(base_pos.available) +
+                     ", [TOTAL_FROZEN] " + std::to_string(base_pos.frozen));
             }
         }
         INFO("Order cancelled: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +

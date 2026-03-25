@@ -9,6 +9,16 @@ static constexpr int MAX_DEPTH_LEVELS = 5;
 
 enum class TradeSide : int8_t { BUY = 1, SELL = -1 };
 
+inline const char* ToString(TradeSide v) {
+    switch (v) {
+    case TradeSide::BUY:
+        return "BUY";
+    case TradeSide::SELL:
+        return "SELL";
+    }
+    return "UNKNOWN";
+}
+
 struct alignas(64) Ticker {
     uint64_t exchange_ts_ms;
     uint64_t local_ts_ns;

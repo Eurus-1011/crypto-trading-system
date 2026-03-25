@@ -42,6 +42,9 @@ class ExchangeClient {
     void StartPrivateListener();
 
   protected:
+    bool ReconnectPrivate();
+
+  protected:
     ExchangeClient() = default;
 
     static std::string HmacSha256Sign(const std::string& key, const std::string& message);
@@ -49,14 +52,12 @@ class ExchangeClient {
     static bool DetectHttpProxy(std::string& proxy_host, std::string& proxy_port);
 
     virtual std::string BuildSubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
-    virtual std::string BuildUnsubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
     virtual std::string BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) = 0;
     virtual std::string BuildLoginMessage() = 0;
     virtual std::string BuildOrderMessage(const OrderRequest& req) = 0;
     virtual std::string BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) = 0;
     virtual void OnPublicMessage(const std::string& raw) = 0;
     virtual void OnPrivateMessage(const std::string& raw) = 0;
-    virtual OrderResult DecodeOrderResponse(const std::string& raw) = 0;
 
     virtual std::string GetPublicWsHost() = 0;
     virtual std::string GetPublicWsPort() = 0;
@@ -80,6 +81,11 @@ class ExchangeClient {
         std::string channel;
         std::string instrument;
     };
-    std::vector<PendingSub> pending_subs_;
+    struct PrivateSub {
+        std::string channel;
+        std::string inst_type;
+    };
+    std::vector<PendingSub> subscriptions_;
+    std::vector<PrivateSub> private_subscriptions_;
     std::mutex sub_mutex_;
 };

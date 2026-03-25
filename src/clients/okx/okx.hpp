@@ -31,14 +31,12 @@ class OkxClient : public ExchangeClient {
 
   protected:
     std::string BuildSubscribeMessage(const std::string& channel, const std::string& instrument) override;
-    std::string BuildUnsubscribeMessage(const std::string& channel, const std::string& instrument) override;
     std::string BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) override;
     std::string BuildLoginMessage() override;
     std::string BuildOrderMessage(const OrderRequest& req) override;
     std::string BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) override;
     void OnPublicMessage(const std::string& raw) override;
     void OnPrivateMessage(const std::string& raw) override;
-    OrderResult DecodeOrderResponse(const std::string& raw) override;
 
     std::string GetPublicWsHost() override;
     std::string GetPublicWsPort() override;

@@ -26,7 +26,11 @@ inline double ParseDouble(const Json::Value& val) {
         if (s.empty()) {
             return 0.0;
         }
-        return std::stod(s);
+        try {
+            return std::stod(s);
+        } catch (...) {
+            return 0.0;
+        }
     }
     return 0.0;
 }
@@ -40,7 +44,11 @@ inline uint64_t ParseUint64(const Json::Value& val) {
         if (s.empty()) {
             return 0;
         }
-        return std::stoull(s);
+        try {
+            return std::stoull(s);
+        } catch (...) {
+            return 0;
+        }
     }
     return 0;
 }
