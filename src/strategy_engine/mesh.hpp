@@ -47,4 +47,9 @@ class MeshStrategy : public Strategy {
     double total_profit_ = 0.0;
     double total_fee_ = 0.0;
     int total_round_trips_ = 0;
+
+    double last_bid_ = 0.0;
+    double last_ask_ = 0.0;
+    uint64_t last_bbo_ts_ns_ = 0;
+    int timer_tick_ = 0;
 };

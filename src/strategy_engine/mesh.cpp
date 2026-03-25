@@ -120,6 +120,10 @@ void MeshStrategy::OnBBO(const BBO& bbo) {
         return;
     }
 
+    last_bid_ = bbo.bid_price;
+    last_ask_ = bbo.ask_price;
+    last_bbo_ts_ns_ = bbo.local_ts_ns;
+
     if (!initialized_) {
         double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
         double quote_remaining = quote_available_;
@@ -248,7 +252,36 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
     }
 }
 
-void MeshStrategy::OnTimer() {}
+void MeshStrategy::OnTimer() {
+    ++timer_tick_;
+    if (timer_tick_ < 60)
+        return;
+    timer_tick_ = 0;
+
+    int buy_pending = 0, bought = 0, sell_pending = 0, empty = 0;
+    for (int idx = 0; idx <= grid_count_; ++idx) {
+        switch (grids_[idx].state) {
+        case GridState::BUY_PENDING:
+            ++buy_pending;
+            break;
+        case GridState::BOUGHT:
+            ++bought;
+            break;
+        case GridState::SELL_PENDING:
+            ++sell_pending;
+            break;
+        case GridState::EMPTY:
+            ++empty;
+            break;
+        }
+    }
+
+    INFO("Heartbeat: [INSTRUMENT] " + instrument_ + ", [BID] " + std::to_string(last_bid_) + ", [ASK] " +
+         std::to_string(last_ask_) + ", [BUY_PENDING] " + std::to_string(buy_pending) + ", [BOUGHT] " +
+         std::to_string(bought) + ", [SELL_PENDING] " + std::to_string(sell_pending) + ", [EMPTY] " +
+         std::to_string(empty) + ", [TOTAL_PROFIT] " + std::to_string(total_profit_) + ", [ROUND_TRIPS] " +
+         std::to_string(total_round_trips_));
+}
 
 int MeshStrategy::FindGridByOrderId(const std::string& order_id) const {
     if (order_id.empty()) {
