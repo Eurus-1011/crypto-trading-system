@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <json/json.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@ class Strategy {
     void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
 
     virtual void Init(const Json::Value& params) = 0;
+    virtual void SetBalances(const std::map<std::string, std::pair<double, double>>& balances) {}
     virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
     virtual void OnTicker(const Ticker& ticker) {}
     virtual void OnBBO(const BBO& bbo) {}

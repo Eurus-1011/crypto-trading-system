@@ -8,6 +8,7 @@
 #include "trading_engine/position_manager.hpp"
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -19,6 +20,7 @@ class TradingEngine {
     void Run();
     void Stop();
     const std::vector<ExecutionReport>& GetPendingOrders() const { return pending_orders_; }
+    const std::map<std::string, std::pair<double, double>>& GetBalances() const { return balances_; }
 
   private:
     void RunOrderDispatcher();
@@ -32,4 +34,5 @@ class TradingEngine {
     PositionManager position_manager_;
     std::atomic<bool> running_{true};
     std::vector<ExecutionReport> pending_orders_;
+    std::map<std::string, std::pair<double, double>> balances_;
 };

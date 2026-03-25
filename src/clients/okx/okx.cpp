@@ -21,18 +21,6 @@ std::string OkxClient::BuildSubscribeMessage(const std::string& channel, const s
     return Json::writeString(writer, msg);
 }
 
-std::string OkxClient::BuildUnsubscribeMessage(const std::string& channel, const std::string& instrument) {
-    Json::Value msg;
-    msg["op"] = "unsubscribe";
-    Json::Value arg;
-    arg["channel"] = channel;
-    arg["instId"] = instrument;
-    msg["args"].append(arg);
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-    return Json::writeString(writer, msg);
-}
-
 std::string OkxClient::BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) {
     Json::Value msg;
     msg["op"] = "subscribe";
@@ -455,19 +443,4 @@ void OkxClient::DecodeAccountUpdate(const Json::Value& data) {
         double frozen = ParseDouble(details[idx]["frozenBal"]);
         on_balance_update_(currency, available, frozen);
     }
-}
-
-OrderResult OkxClient::DecodeOrderResponse(const std::string& raw) {
-    Json::Value root = ParseJson(raw);
-    OrderResult result{};
-    result.code = root.get("code", "-1").asString();
-    result.success = (result.code == "0");
-    if (result.success && root["data"].isArray() && !root["data"].empty()) {
-        auto& orderData = root["data"][0];
-        result.order_id = orderData.get("ordId", "").asString();
-        result.message = orderData.get("sMsg", "").asString();
-    } else {
-        result.message = root.get("msg", "unknown error").asString();
-    }
-    return result;
 }

@@ -10,8 +10,8 @@ void TradingEngine::Init() {
     client_->LoginPrivate();
     INFO("Login private ws success");
 
-    auto balances = client_->QueryBalances();
-    position_manager_.InitFromExchange(balances);
+    balances_ = client_->QueryBalances();
+    position_manager_.InitFromExchange(balances_);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
 
@@ -67,9 +67,9 @@ void TradingEngine::RunOrderDispatcher() {
                 request.price = std::to_string(signal.price);
             }
 
-            std::string side_str = (request.side == Side::BUY) ? "buy" : "sell";
-            INFO("Send place order: [INSTRUMENT] " + request.instrument + ", [SIDE] " + side_str + ", [SIZE] " +
-                 request.size);
+            std::string price_str = request.price.empty() ? "MARKET" : request.price;
+            INFO("Send place order: [INSTRUMENT] " + request.instrument + ", [SIDE] " +
+                 std::string(ToString(request.side)) + ", [PRICE] " + price_str + ", [VOLUME] " + request.size);
 
             client_->SendPlaceOrder(request);
         }
@@ -81,18 +81,20 @@ void TradingEngine::RunOrderListener() { client_->StartPrivateListener(); }
 void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     shm_push(report_ring_, report);
 
+    std::string base_log = "Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
+                           std::string(report.instrument) + ", [STATUS] " + ToString(report.status);
+
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         position_manager_.UpdateOnFill(report);
-        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] filled" +
-             ", [FILLED] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
+        INFO(base_log + ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
              std::to_string(report.avg_fill_price));
     } else if (report.status == OrderStatus::CANCELLED) {
         position_manager_.UpdateOnCancel(report);
-        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] cancelled");
+        INFO(base_log);
     } else if (report.status == OrderStatus::REJECTED) {
-        ERROR("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] rejected");
+        ERROR(base_log);
     } else if (report.status == OrderStatus::NEW) {
         position_manager_.UpdateOnNew(report);
-        INFO("Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [STATUS] new");
+        INFO(base_log);
     }
 }

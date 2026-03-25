@@ -2,6 +2,9 @@
 
 #include "common/logger.hpp"
 
+#include <chrono>
+#include <thread>
+
 bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy_port) {
     const char* proxy_env = std::getenv("https_proxy");
     if (!proxy_env) {
@@ -51,12 +54,10 @@ Json::Value ExchangeClient::ParseJson(const std::string& raw) {
 }
 
 void ExchangeClient::Subscribe(const std::string& channel, const std::string& instrument) {
-    std::string msg = BuildSubscribeMessage(channel, instrument);
-    if (running_) {
-        public_ws_.Send(msg);
-    } else {
-        std::lock_guard<std::mutex> lock(sub_mutex_);
-        pending_subs_.push_back({channel, instrument});
+    std::lock_guard<std::mutex> lock(sub_mutex_);
+    subscriptions_.push_back({channel, instrument});
+    if (public_ws_.IsOpen()) {
+        public_ws_.Send(BuildSubscribeMessage(channel, instrument));
     }
 }
 
@@ -66,6 +67,10 @@ void ExchangeClient::SendToPrivate(const std::string& msg) {
 }
 
 void ExchangeClient::SubscribePrivateChannel(const std::string& channel, const std::string& inst_type) {
+    {
+        std::lock_guard<std::mutex> lock(sub_mutex_);
+        private_subscriptions_.push_back({channel, inst_type});
+    }
     std::string msg = BuildPrivateSubscribeMessage(channel, inst_type);
     SendToPrivate(msg);
 }
@@ -86,31 +91,44 @@ void ExchangeClient::Start() {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
-    if (!public_ws_.Connect(GetPublicWsHost(), GetPublicWsPort(), GetPublicWsPath(), proxy_host, proxy_port)) {
-        throw std::runtime_error("failed to connect public ws");
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(sub_mutex_);
-        for (auto& sub : pending_subs_) {
-            public_ws_.Send(BuildSubscribeMessage(sub.channel, sub.instrument));
-        }
-        pending_subs_.clear();
-    }
-
     while (running_) {
-        std::string raw;
-        if (!public_ws_.ReadWithTimeout(raw, 15)) {
-            break;
-        }
-        if (raw.empty()) {
-            public_ws_.Send("ping");
+        if (!public_ws_.Connect(GetPublicWsHost(), GetPublicWsPort(), GetPublicWsPath(), proxy_host, proxy_port)) {
+            WARN("Public ws connect failed, retry in 5s");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
         }
-        if (raw == "pong") {
-            continue;
+        INFO("Public ws connected");
+
+        {
+            std::lock_guard<std::mutex> lock(sub_mutex_);
+            for (auto& sub : subscriptions_) {
+                public_ws_.Send(BuildSubscribeMessage(sub.channel, sub.instrument));
+            }
         }
-        OnPublicMessage(raw);
+
+        while (running_) {
+            std::string raw;
+            if (!public_ws_.ReadWithTimeout(raw, 15)) {
+                if (running_) {
+                    WARN("Public ws read failed");
+                }
+                break;
+            }
+            if (raw.empty()) {
+                public_ws_.Send("ping");
+                continue;
+            }
+            if (raw == "pong") {
+                continue;
+            }
+            OnPublicMessage(raw);
+        }
+
+        public_ws_.Close();
+        if (running_) {
+            WARN("Reconnecting public ws in 3s");
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+        }
     }
 }
 
@@ -147,7 +165,19 @@ void ExchangeClient::StartPrivateListener() {
     while (running_) {
         std::string raw;
         if (!private_ws_.ReadWithTimeout(raw, 15)) {
-            break;
+            if (!running_)
+                break;
+            WARN("Private ws read failed");
+
+            WARN("Reconnecting private ws in 3s");
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if (ReconnectPrivate()) {
+                INFO("Private ws reconnected");
+            } else {
+                WARN("Private ws reconnect failed, retry in 5s");
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+            continue;
         }
         if (raw.empty()) {
             private_ws_.Send("ping");
@@ -158,4 +188,37 @@ void ExchangeClient::StartPrivateListener() {
         }
         OnPrivateMessage(raw);
     }
+}
+
+bool ExchangeClient::ReconnectPrivate() {
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    std::lock_guard<std::mutex> lock(sub_mutex_);
+
+    private_ws_.Close();
+
+    if (!private_ws_.Connect(GetPrivateWsHost(), GetPrivateWsPort(), GetPrivateWsPath(), proxy_host, proxy_port)) {
+        return false;
+    }
+
+    private_ws_.Send(BuildLoginMessage());
+
+    std::string response;
+    if (!private_ws_.Read(response)) {
+        private_ws_.Close();
+        return false;
+    }
+
+    Json::Value root = ParseJson(response);
+    if (root.get("event", "").asString() != "login" || root.get("code", "-1").asString() != "0") {
+        private_ws_.Close();
+        return false;
+    }
+
+    for (auto& sub : private_subscriptions_) {
+        private_ws_.Send(BuildPrivateSubscribeMessage(sub.channel, sub.inst_type));
+    }
+
+    return true;
 }
