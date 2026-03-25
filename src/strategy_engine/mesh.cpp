@@ -4,15 +4,31 @@
 
 #include <cmath>
 
+void MeshStrategy::SetBalances(const std::map<std::string, std::pair<double, double>>& balances) {
+    auto dash_pos = instrument_.find('-');
+    if (dash_pos == std::string::npos)
+        return;
+
+    std::string base = instrument_.substr(0, dash_pos);
+    std::string quote = instrument_.substr(dash_pos + 1);
+
+    if (auto it = balances.find(base); it != balances.end()) {
+        base_available_ = it->second.first;
+    }
+    if (auto it = balances.find(quote); it != balances.end()) {
+        quote_available_ = it->second.first;
+    }
+}
+
 void MeshStrategy::Init(const Json::Value& params) {
     instrument_ = params.get("instrument", "BTC-USDT").asString();
     upper_price_ = params.get("upper_price", 0.0).asDouble();
     lower_price_ = params.get("lower_price", 0.0).asDouble();
     grid_count_ = params.get("grid_count", 10).asInt();
-    total_investment_ = params.get("total_investment", 100.0).asDouble();
+    grid_volume_ = params.get("grid_volume", 0.0).asDouble();
     fee_rate_ = params.get("fee_rate", 0.001).asDouble();
 
-    if (upper_price_ <= lower_price_ || grid_count_ <= 0) {
+    if (upper_price_ <= lower_price_ || grid_count_ <= 0 || grid_volume_ <= 0) {
         ERROR("Mesh init failed: invalid params"
               ", [UPPER] " +
               std::to_string(upper_price_) + ", [LOWER] " + std::to_string(lower_price_) + ", [GRID_COUNT] " +
@@ -38,14 +54,13 @@ void MeshStrategy::Init(const Json::Value& params) {
     grids_.resize(grid_count_ + 1);
     for (int idx = 0; idx <= grid_count_; ++idx) {
         grids_[idx].price = lower_price_ + idx * grid_step_;
-        grids_[idx].volume = total_investment_ / (grid_count_ + 1) / mid_price;
+        grids_[idx].volume = grid_volume_;
     }
 
     INFO("Mesh init success: [INSTRUMENT] " + instrument_ + ", [RANGE] " + std::to_string(lower_price_) + " ~ " +
          std::to_string(upper_price_) + ", [GRIDS] " + std::to_string(grid_count_) + ", [STEP] " +
-         std::to_string(grid_step_) + ", [VOLUME_PER_GRID] " + std::to_string(grids_[0].volume) +
-         ", [NET_PROFIT_RATE] " + std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%" +
-         ", [INVESTMENT] " + std::to_string(total_investment_));
+         std::to_string(grid_step_) + ", [GRID_VOLUME] " + std::to_string(grid_volume_) + ", [NET_PROFIT_RATE] " +
+         std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%");
 }
 
 void MeshStrategy::Reconstruct(const std::vector<ExecutionReport>& pending_orders) {
@@ -107,13 +122,40 @@ void MeshStrategy::OnBBO(const BBO& bbo) {
 
     if (!initialized_) {
         double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
-        INFO("Place initial grid orders: [MID_PRICE] " + std::to_string(mid_price));
+        double quote_remaining = quote_available_;
+        double base_remaining = base_available_;
+        int buy_count = 0;
+        int sell_count = 0;
+
+        for (int idx = grid_count_; idx >= 0; --idx) {
+            if (grids_[idx].state != GridState::EMPTY)
+                continue;
+            if (grids_[idx].price >= mid_price - grid_step_ * 0.5)
+                continue;
+            double cost = grids_[idx].price * grids_[idx].volume;
+            if (quote_remaining < cost)
+                break;
+            PlaceBuyAtGrid(idx);
+            quote_remaining -= cost;
+            ++buy_count;
+        }
 
         for (int idx = 0; idx <= grid_count_; ++idx) {
-            if (grids_[idx].state == GridState::EMPTY && grids_[idx].price < mid_price - grid_step_ * 0.5) {
-                PlaceBuyAtGrid(idx);
-            }
+            if (grids_[idx].state != GridState::EMPTY)
+                continue;
+            if (grids_[idx].price < mid_price + grid_step_ * 0.5)
+                continue;
+            if (base_remaining < grids_[idx].volume)
+                break;
+            PlaceSellAtGrid(idx);
+            base_remaining -= grids_[idx].volume;
+            ++sell_count;
         }
+
+        INFO("Place initial grid orders: [MID_PRICE] " + std::to_string(mid_price) + ", [BUY_GRIDS] " +
+             std::to_string(buy_count) + ", [SELL_GRIDS] " + std::to_string(sell_count) + ", [QUOTE_USED] " +
+             std::to_string(quote_available_ - quote_remaining) + ", [BASE_USED] " +
+             std::to_string(base_available_ - base_remaining));
         initialized_ = true;
     }
 }
@@ -160,7 +202,9 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             }
         } else if (grid.state == GridState::SELL_PENDING) {
             int buy_grid = grid_index - 1;
-            double buy_price = (buy_grid >= 0) ? grids_[buy_grid].buy_fill_price : grid.price;
+            double buy_price = (buy_grid >= 0 && grids_[buy_grid].buy_fill_price > 0)
+                                   ? grids_[buy_grid].buy_fill_price
+                                   : grids_[buy_grid >= 0 ? buy_grid : grid_index].price;
             double gross_profit = (report.avg_fill_price - buy_price) * report.filled_volume;
             double buy_fee = buy_price * report.filled_volume * fee_rate_;
             double net_profit = gross_profit - fee - buy_fee;

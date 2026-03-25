@@ -10,8 +10,8 @@ void TradingEngine::Init() {
     client_->LoginPrivate();
     INFO("Login private ws success");
 
-    auto balances = client_->QueryBalances();
-    position_manager_.InitFromExchange(balances);
+    balances_ = client_->QueryBalances();
+    position_manager_.InitFromExchange(balances_);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
 

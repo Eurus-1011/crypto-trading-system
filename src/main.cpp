@@ -103,6 +103,7 @@ int main(int argc, char* argv[]) {
 
     trading_engine.Init();
     strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
+    strategy_engine.SetBalances(trading_engine.GetBalances());
 
     std::thread quotation_thread([&]() { quotation_engine.Run(); });
     std::thread strategy_thread([&]() { strategy_engine.Run(); });

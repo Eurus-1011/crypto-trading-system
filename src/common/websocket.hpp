@@ -109,7 +109,11 @@ inline bool WsClient::TlsHandshake(const std::string& host) {
     ssl_ = SSL_new(ssl_ctx_);
     SSL_set_tlsext_host_name(ssl_, host.c_str());
     SSL_set_fd(ssl_, fd_);
-    return SSL_connect(ssl_) == 1;
+    if (SSL_connect(ssl_) != 1) {
+        Close();
+        return false;
+    }
+    return true;
 }
 
 inline bool WsClient::RawSend(const void* data, size_t len) {
@@ -210,9 +214,14 @@ inline bool WsClient::Connect(const std::string& host, const std::string& port, 
         }
     }
     if (!TlsHandshake(host)) {
+        Close();
         return false;
     }
-    return WsHandshake(host, port, path);
+    if (!WsHandshake(host, port, path)) {
+        Close();
+        return false;
+    }
+    return true;
 }
 
 inline void WsClient::Shutdown() {
