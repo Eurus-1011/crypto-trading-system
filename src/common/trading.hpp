@@ -9,8 +9,57 @@
 enum class Side : int8_t { BUY = 1, SELL = -1 };
 enum class OrderType : int8_t { MARKET = 0, LIMIT = 1 };
 enum class Action : int8_t { BUY = 1, SELL = -1, CANCEL = 0 };
-
 enum class OrderStatus : int8_t { NEW, FILLED, PARTIALLY_FILLED, CANCELLED, CANCEL_FAILED, REJECTED };
+
+inline const char* ToString(Side v) {
+    switch (v) {
+    case Side::BUY:
+        return "BUY";
+    case Side::SELL:
+        return "SELL";
+    }
+    return "UNKNOWN";
+}
+
+inline const char* ToString(OrderType v) {
+    switch (v) {
+    case OrderType::MARKET:
+        return "MARKET";
+    case OrderType::LIMIT:
+        return "LIMIT";
+    }
+    return "UNKNOWN";
+}
+
+inline const char* ToString(Action v) {
+    switch (v) {
+    case Action::BUY:
+        return "BUY";
+    case Action::SELL:
+        return "SELL";
+    case Action::CANCEL:
+        return "CANCEL";
+    }
+    return "UNKNOWN";
+}
+
+inline const char* ToString(OrderStatus v) {
+    switch (v) {
+    case OrderStatus::NEW:
+        return "NEW";
+    case OrderStatus::FILLED:
+        return "FILLED";
+    case OrderStatus::PARTIALLY_FILLED:
+        return "PARTIALLY_FILLED";
+    case OrderStatus::CANCELLED:
+        return "CANCELLED";
+    case OrderStatus::CANCEL_FAILED:
+        return "CANCEL_FAILED";
+    case OrderStatus::REJECTED:
+        return "REJECTED";
+    }
+    return "UNKNOWN";
+}
 
 struct alignas(64) Signal {
     uint64_t timestamp_ns;
@@ -61,13 +110,6 @@ struct OrderRequest {
     std::string size;
     std::string price;
     std::string target_currency;
-};
-
-struct OrderResult {
-    bool success;
-    std::string order_id;
-    std::string code;
-    std::string message;
 };
 
 static constexpr const char* SHM_SIGNAL = "/cts_signal";

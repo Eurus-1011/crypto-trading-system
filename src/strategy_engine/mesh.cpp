@@ -63,7 +63,7 @@ void MeshStrategy::Reconstruct(const std::vector<ExecutionReport>& pending_order
             EmitCancel(report.instrument, report.order_id);
             ++cancelled;
             INFO("Cancel unmatched pending order: [ORDER_ID] " + std::string(report.order_id) + ", [PRICE] " +
-                 std::to_string(report.price) + ", [SIDE] " + std::string(report.side == Side::BUY ? "buy" : "sell"));
+                 std::to_string(report.price) + ", [SIDE] " + ToString(report.side));
         }
     }
 
@@ -151,9 +151,9 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::BOUGHT;
             grid.buy_fill_price = report.avg_fill_price;
             grid.order_id.clear();
-            INFO("Grid BUY filled: [GRID] " + std::to_string(grid_index) + ", [FILL_PRICE] " +
-                 std::to_string(report.avg_fill_price) + ", [VOLUME] " + std::to_string(report.filled_volume) +
-                 ", [FEE] " + std::to_string(fee));
+            INFO("Grid order filled: [INSTRUMENT] " + instrument_ + ", [SIDE] BUY, [GRID] " +
+                 std::to_string(grid_index) + ", [PRICE] " + std::to_string(report.avg_fill_price) + ", [VOLUME] " +
+                 std::to_string(report.filled_volume) + ", [FEE] " + std::to_string(fee));
 
             if (grid_index < grid_count_) {
                 PlaceSellAtGrid(grid_index + 1);
@@ -169,8 +169,9 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
 
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
-            INFO("Grid SELL filled: [GRID] " + std::to_string(grid_index) + ", [BUY_PRICE] " +
-                 std::to_string(buy_price) + ", [SELL_PRICE] " + std::to_string(report.avg_fill_price) +
+            INFO("Grid order filled: [INSTRUMENT] " + instrument_ + ", [SIDE] SELL, [GRID] " +
+                 std::to_string(grid_index) + ", [BUY_PRICE] " + std::to_string(buy_price) + ", [SELL_PRICE] " +
+                 std::to_string(report.avg_fill_price) + ", [VOLUME] " + std::to_string(report.filled_volume) +
                  ", [NET_PROFIT] " + std::to_string(net_profit) + ", [TOTAL_PROFIT] " + std::to_string(total_profit_) +
                  ", [TOTAL_FEE] " + std::to_string(total_fee_) + ", [ROUND_TRIPS] " +
                  std::to_string(total_round_trips_));
@@ -240,8 +241,8 @@ void MeshStrategy::PlaceBuyAtGrid(int grid_index) {
     grid.order_id.clear();
     EmitBuy(instrument_.c_str(), OrderType::LIMIT, grid.price, grid.volume);
 
-    INFO("Place grid BUY: [GRID] " + std::to_string(grid_index) + ", [PRICE] " + std::to_string(grid.price) +
-         ", [VOLUME] " + std::to_string(grid.volume));
+    INFO("Place grid order: [INSTRUMENT] " + instrument_ + ", [SIDE] BUY, [GRID] " + std::to_string(grid_index) +
+         ", [PRICE] " + std::to_string(grid.price) + ", [VOLUME] " + std::to_string(grid.volume));
 }
 
 void MeshStrategy::PlaceSellAtGrid(int grid_index) {
@@ -258,6 +259,6 @@ void MeshStrategy::PlaceSellAtGrid(int grid_index) {
     grid.order_id.clear();
     EmitSell(instrument_.c_str(), OrderType::LIMIT, grid.price, grid.volume);
 
-    INFO("Place grid SELL: [GRID] " + std::to_string(grid_index) + ", [PRICE] " + std::to_string(grid.price) +
-         ", [VOLUME] " + std::to_string(grid.volume));
+    INFO("Place grid order: [INSTRUMENT] " + instrument_ + ", [SIDE] SELL, [GRID] " + std::to_string(grid_index) +
+         ", [PRICE] " + std::to_string(grid.price) + ", [VOLUME] " + std::to_string(grid.volume));
 }
