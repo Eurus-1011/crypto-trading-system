@@ -19,7 +19,6 @@ void StrategyEngine::Run() {
 
     strategy->Bind(signal_ring_);
     strategy->Init(config_.strategy_engine.params);
-    strategy->SetBalances(balances_);
 
     if (!pending_orders_.empty()) {
         strategy->Reconstruct(pending_orders_);
@@ -70,7 +69,7 @@ void StrategyEngine::Run() {
         }
 
         if (!has_data) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            _mm_pause();
         }
     }
 

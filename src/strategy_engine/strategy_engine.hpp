@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <functional>
+#include <immintrin.h>
 #include <memory>
 #include <thread>
 
@@ -20,7 +21,6 @@ class StrategyEngine {
     void Stop();
     void SetFactory(StrategyFactory factory) { factory_ = std::move(factory); }
     void SetPendingOrders(const std::vector<ExecutionReport>& orders) { pending_orders_ = orders; }
-    void SetBalances(const std::map<std::string, std::pair<double, double>>& balances) { balances_ = balances; }
 
   private:
     const SystemConfig& config_;
@@ -33,5 +33,4 @@ class StrategyEngine {
     StrategyFactory factory_;
     std::atomic<bool> running_{true};
     std::vector<ExecutionReport> pending_orders_;
-    std::map<std::string, std::pair<double, double>> balances_;
 };
