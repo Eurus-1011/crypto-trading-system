@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(crypto-trading-system LANGUAGES CXX)
+
+set(TARGET_NAME crypto-trading-system)
+
+project(${TARGET_NAME} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,7 +33,7 @@ target_link_libraries(exchange_client PUBLIC
     pthread
 )
 
-add_executable(crypto-trading-system
+add_executable(${TARGET_NAME}
     src/main.cpp
     src/quotation_engine/quotation_engine.cpp
     src/strategy_engine/strategy.cpp
@@ -39,6 +42,6 @@ add_executable(crypto-trading-system
     src/trading_engine/trading_engine.cpp
     src/trading_engine/position_manager.cpp
 )
-target_include_directories(crypto-trading-system PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(crypto-trading-system PRIVATE exchange_client rt)
-target_compile_options(crypto-trading-system PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_link_libraries(${TARGET_NAME} PRIVATE exchange_client rt)
+target_compile_options(${TARGET_NAME} PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
