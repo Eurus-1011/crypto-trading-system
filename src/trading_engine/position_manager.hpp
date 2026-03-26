@@ -2,12 +2,9 @@
 
 #include "common/logger.hpp"
 #include "common/trading.hpp"
-#include "common/utils.hpp"
 
 #include <cmath>
 #include <map>
-#include <mutex>
-#include <string>
 
 struct Position {
     std::string currency;

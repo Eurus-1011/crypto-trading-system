@@ -1,9 +1,10 @@
 #pragma once
 
+#include "common/logger.hpp"
 #include "strategy_engine/strategy.hpp"
 
-#include <string>
-#include <vector>
+#include <chrono>
+#include <cmath>
 
 enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING };
 
@@ -51,5 +52,5 @@ class MeshStrategy : public Strategy {
     double last_bid_ = 0.0;
     double last_ask_ = 0.0;
     uint64_t last_bbo_ts_ns_ = 0;
-    int timer_tick_ = 0;
+    std::chrono::steady_clock::time_point last_heartbeat_ts_{};
 };

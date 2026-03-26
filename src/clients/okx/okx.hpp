@@ -3,13 +3,9 @@
 #include "clients/exchange_client.hpp"
 #include "common/config.hpp"
 #include "common/https.hpp"
-#include "common/logger.hpp"
+#include "common/utils.hpp"
 
-#include <chrono>
-#include <ctime>
 #include <map>
-#include <string>
-#include <vector>
 
 static constexpr const char* OkxPublicWsHost = "ws.okx.com";
 static constexpr const char* OkxPublicWsPort = "443";
