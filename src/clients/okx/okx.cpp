@@ -333,6 +333,8 @@ void OkxClient::DecodeOrderUpdate(const Json::Value& data) {
     report.filled_volume = ParseDouble(data["accFillSz"]);
     report.total_volume = ParseDouble(data["sz"]);
     report.avg_fill_price = ParseDouble(data["avgPx"]);
+    report.fee = ParseDouble(data["fillFee"]);
+    report.SetFeeCurrency(data.get("feeCcy", "").asString().c_str());
     on_order_update_(report);
 }
 

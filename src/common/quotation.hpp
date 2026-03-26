@@ -3,7 +3,6 @@
 #include "ring_shm.hpp"
 
 #include <cstdint>
-#include <cstring>
 
 static constexpr int MAX_DEPTH_LEVELS = 5;
 

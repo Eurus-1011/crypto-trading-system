@@ -15,8 +15,9 @@ class Logger {
     explicit Logger(const std::string& path) : fp_(std::fopen(path.c_str(), "a")) { assert(fp_); }
 
     ~Logger() {
-        if (fp_)
+        if (fp_) {
             std::fclose(fp_);
+        }
     }
 
     void log(LogLevel level, const char* msg) {
@@ -44,8 +45,9 @@ inline Logger*& GetLogPtr() {
 
 inline void InitLog(const std::string& path) {
     Logger*& p = GetLogPtr();
-    if (p)
+    if (p) {
         delete p;
+    }
     p = new Logger(path);
 }
 

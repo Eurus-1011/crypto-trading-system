@@ -1,10 +1,5 @@
 #include "exchange_client.hpp"
 
-#include "common/logger.hpp"
-
-#include <chrono>
-#include <thread>
-
 bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy_port) {
     const char* proxy_env = std::getenv("https_proxy");
     if (!proxy_env) {
@@ -97,8 +92,6 @@ void ExchangeClient::Start() {
             std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
         }
-        INFO("Public ws connected");
-
         {
             std::lock_guard<std::mutex> lock(sub_mutex_);
             for (auto& sub : subscriptions_) {
@@ -109,9 +102,6 @@ void ExchangeClient::Start() {
         while (running_) {
             std::string raw;
             if (!public_ws_.ReadWithTimeout(raw, 15)) {
-                if (running_) {
-                    WARN("Public ws read failed");
-                }
                 break;
             }
             if (raw.empty()) {
@@ -126,7 +116,6 @@ void ExchangeClient::Start() {
 
         public_ws_.Close();
         if (running_) {
-            WARN("Reconnecting public ws in 3s");
             std::this_thread::sleep_for(std::chrono::seconds(3));
         }
     }
@@ -165,15 +154,12 @@ void ExchangeClient::StartPrivateListener() {
     while (running_) {
         std::string raw;
         if (!private_ws_.ReadWithTimeout(raw, 15)) {
-            if (!running_)
+            if (!running_) {
                 break;
-            WARN("Private ws read failed");
+            }
 
-            WARN("Reconnecting private ws in 3s");
             std::this_thread::sleep_for(std::chrono::seconds(3));
-            if (ReconnectPrivate()) {
-                INFO("Private ws reconnected");
-            } else {
+            if (!ReconnectPrivate()) {
                 WARN("Private ws reconnect failed, retry in 5s");
                 std::this_thread::sleep_for(std::chrono::seconds(5));
             }

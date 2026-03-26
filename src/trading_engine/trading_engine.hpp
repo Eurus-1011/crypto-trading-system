@@ -1,17 +1,10 @@
 #pragma once
 
 #include "clients/okx/okx.hpp"
-#include "common/config.hpp"
 #include "common/cpu_affinity.hpp"
-#include "common/logger.hpp"
-#include "common/trading.hpp"
 #include "trading_engine/position_manager.hpp"
 
-#include <atomic>
-#include <map>
 #include <memory>
-#include <thread>
-#include <vector>
 
 class TradingEngine {
   public:

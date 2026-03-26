@@ -3,6 +3,7 @@
 #include "common/quotation.hpp"
 #include "common/trading.hpp"
 #include "quotation_engine/quotation_engine.hpp"
+#include "strategy_engine/mesh.hpp"
 #include "strategy_engine/strategy_engine.hpp"
 #include "trading_engine/trading_engine.hpp"
 
@@ -104,6 +105,12 @@ int main(int argc, char* argv[]) {
     trading_engine.Init();
     strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
     strategy_engine.SetBalances(trading_engine.GetBalances());
+    strategy_engine.SetFactory([](const std::string& name) -> std::unique_ptr<Strategy> {
+        if (name == "mesh") {
+            return std::make_unique<MeshStrategy>();
+        }
+        return nullptr;
+    });
 
     std::thread quotation_thread([&]() { quotation_engine.Run(); });
     std::thread strategy_thread([&]() { strategy_engine.Run(); });

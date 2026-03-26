@@ -1,10 +1,7 @@
 #pragma once
 
 #include "clients/okx/okx.hpp"
-#include "common/config.hpp"
 #include "common/cpu_affinity.hpp"
-#include "common/logger.hpp"
-#include "common/quotation.hpp"
 
 class QuotationEngine {
   public:
