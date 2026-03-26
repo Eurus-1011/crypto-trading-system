@@ -1,26 +1,17 @@
 #include "strategy_engine.hpp"
 
-#include "strategy_engine/mesh.hpp"
-
 StrategyEngine::StrategyEngine(const SystemConfig& config, TickerRing* ticker_ring, BBORing* bbo_ring,
                                DepthRing* depth_ring, TradeRing* trade_ring, SignalRing* signal_ring,
                                ExecutionReportRing* report_ring)
     : config_(config), ticker_ring_(ticker_ring), bbo_ring_(bbo_ring), depth_ring_(depth_ring), trade_ring_(trade_ring),
       signal_ring_(signal_ring), report_ring_(report_ring) {}
 
-std::unique_ptr<Strategy> StrategyEngine::CreateStrategy(const std::string& name) {
-    if (name == "mesh") {
-        return std::make_unique<MeshStrategy>();
-    }
-    return nullptr;
-}
-
 void StrategyEngine::Run() {
     if (!config_.strategy_engine.cpu_affinity.empty()) {
         BindThreadToCpus(config_.strategy_engine.cpu_affinity);
     }
 
-    auto strategy = CreateStrategy(config_.strategy_engine.name);
+    auto strategy = factory_ ? factory_(config_.strategy_engine.name) : nullptr;
     if (!strategy) {
         ERROR("Unknown strategy: [NAME] " + config_.strategy_engine.name);
         return;
@@ -36,8 +27,8 @@ void StrategyEngine::Run() {
 
     INFO("Start strategy engine: [STRATEGY] " + config_.strategy_engine.name);
 
-    uint64_t last_timer_ns = NowNs();
-    static constexpr uint64_t TIMER_INTERVAL_NS = 1000000000ULL;
+    auto last_timer_ts = std::chrono::steady_clock::now();
+    static constexpr auto TIMER_INTERVAL = std::chrono::seconds(1);
 
     while (running_ && strategy->IsRunning()) {
         bool has_data = false;
@@ -72,10 +63,10 @@ void StrategyEngine::Run() {
             has_data = true;
         }
 
-        uint64_t now = NowNs();
-        if (now - last_timer_ns >= TIMER_INTERVAL_NS) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_timer_ts >= TIMER_INTERVAL) {
             strategy->OnTimer();
-            last_timer_ns = now;
+            last_timer_ts = now;
         }
 
         if (!has_data) {

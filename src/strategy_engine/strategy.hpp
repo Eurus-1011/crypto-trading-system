@@ -4,10 +4,7 @@
 #include "common/trading.hpp"
 #include "common/utils.hpp"
 
-#include <atomic>
-#include <json/json.h>
 #include <map>
-#include <string>
 #include <vector>
 
 class Strategy {

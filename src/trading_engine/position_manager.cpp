@@ -59,20 +59,38 @@ void PositionManager::UpdateOnNew(const ExecutionReport& report) {
 void PositionManager::UpdateOnFill(const ExecutionReport& report) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string base_currency = ExtractBaseCurrency(report.instrument);
+    std::string quote_currency = ExtractQuoteCurrency(report.instrument);
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         auto& base_pos = positions_[base_currency];
+        auto& quote_pos = positions_[quote_currency];
         base_pos.currency = base_currency;
+        quote_pos.currency = quote_currency;
 
         if (report.side == Side::BUY) {
+            double quote_consumed = report.avg_fill_price * report.filled_volume;
+            quote_pos.frozen -= quote_consumed;
             base_pos.available += report.filled_volume;
+            if (std::string(report.fee_currency) == base_currency) {
+                base_pos.available += report.fee;
+            } else if (std::string(report.fee_currency) == quote_currency) {
+                quote_pos.available += report.fee;
+            }
         } else {
+            double quote_received = report.avg_fill_price * report.filled_volume;
             base_pos.frozen -= report.filled_volume;
+            quote_pos.available += quote_received;
+            if (std::string(report.fee_currency) == quote_currency) {
+                quote_pos.available += report.fee;
+            } else if (std::string(report.fee_currency) == base_currency) {
+                base_pos.available += report.fee;
+            }
         }
 
         INFO("Update position on fill: [CURRENCY] " + base_currency + ", [SIDE] " + ToString(report.side) +
-             ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [TOTAL_FROZEN] " +
-             std::to_string(base_pos.frozen));
+             ", [BASE_AVAIL] " + std::to_string(base_pos.available) + ", [BASE_FROZEN] " +
+             std::to_string(base_pos.frozen) + ", [QUOTE_AVAIL] " + std::to_string(quote_pos.available) +
+             ", [QUOTE_FROZEN] " + std::to_string(quote_pos.frozen));
     }
 }
 

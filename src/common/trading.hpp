@@ -3,7 +3,6 @@
 #include "ring_shm.hpp"
 
 #include <cstdint>
-#include <cstring>
 #include <string>
 
 enum class Side : int8_t { BUY = 1, SELL = -1 };
@@ -91,6 +90,8 @@ struct alignas(64) ExecutionReport {
     double filled_volume;
     double total_volume;
     double avg_fill_price;
+    double fee;
+    char fee_currency[16];
 
     void SetInstrument(const char* src) {
         std::strncpy(instrument, src, sizeof(instrument) - 1);
@@ -100,6 +101,11 @@ struct alignas(64) ExecutionReport {
     void SetOrderId(const char* src) {
         std::strncpy(order_id, src, sizeof(order_id) - 1);
         order_id[sizeof(order_id) - 1] = '\0';
+    }
+
+    void SetFeeCurrency(const char* src) {
+        std::strncpy(fee_currency, src, sizeof(fee_currency) - 1);
+        fee_currency[sizeof(fee_currency) - 1] = '\0';
     }
 };
 
