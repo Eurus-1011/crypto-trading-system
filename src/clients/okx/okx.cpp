@@ -77,11 +77,14 @@ std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
     std::string side_str = (req.side == Side::BUY) ? "buy" : "sell";
     std::string order_type = (req.order_type == OrderType::MARKET) ? "market" : "limit";
 
+    std::string id = std::to_string(NowNs());
+    pending_ws_ops_[id] = req;
+
     Json::Value msg;
-    msg["id"] = std::to_string(NowNs());
+    msg["id"] = id;
     msg["op"] = "order";
     Json::Value arg;
-    arg["instId"] = req.instrument;
+    arg["instIdCode"] = inst_id_codes_.count(req.instrument) ? inst_id_codes_.at(req.instrument) : 0;
     arg["tdMode"] = "cash";
     arg["side"] = side_str;
     arg["ordType"] = order_type;
@@ -104,13 +107,40 @@ std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, co
     msg["id"] = std::to_string(NowNs());
     msg["op"] = "cancel-order";
     Json::Value arg;
-    arg["instId"] = instrument;
+    arg["instIdCode"] = inst_id_codes_.count(instrument) ? inst_id_codes_.at(instrument) : 0;
     arg["ordId"] = order_id;
     msg["args"].append(arg);
 
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
     return Json::writeString(writer, msg);
+}
+
+void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments) {
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    for (const auto& inst : instruments) {
+        std::string path = "/api/v5/public/instruments?instType=SPOT&instId=" + inst;
+        std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, "", "", proxy_host, proxy_port);
+        if (raw_body.empty()) {
+            WARN("FetchInstrumentCodes failed: [INSTRUMENT] " + inst);
+            continue;
+        }
+        auto json_start = raw_body.find('{');
+        if (json_start == std::string::npos) {
+            WARN("FetchInstrumentCodes invalid response: [INSTRUMENT] " + inst);
+            continue;
+        }
+        Json::Value root = ParseJson(raw_body.substr(json_start));
+        if (root.get("code", "-1").asString() != "0" || !root["data"].isArray() || root["data"].empty()) {
+            WARN("FetchInstrumentCodes error: [INSTRUMENT] " + inst + ", [MSG] " + root.get("msg", "").asString());
+            continue;
+        }
+        int code = root["data"][0].get("instIdCode", 0).asInt();
+        inst_id_codes_[inst] = code;
+        INFO("Fetch instIdCode: [INSTRUMENT] " + inst + ", [CODE] " + std::to_string(code));
+    }
 }
 
 std::vector<ExecutionReport> OkxClient::QueryPendingOrders(const std::string& inst_type) {
@@ -285,13 +315,36 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
 
     if (root.isMember("op")) {
         std::string code = root.get("code", "").asString();
+        std::string op = root.get("op", "").asString();
+        std::string id = root.get("id", "").asString();
         if (code != "0") {
-            std::string op = root.get("op", "").asString();
             std::string msg = root.get("msg", "").asString();
             if (root["data"].isArray() && !root["data"].empty()) {
                 msg = root["data"][0].get("sMsg", msg).asString();
             }
             ERROR("Private ws op failed: [OP] " + op + ", [CODE] " + code + ", [MSG] " + msg);
+
+            if (op == "order" && on_order_update_ && !id.empty()) {
+                auto it = pending_ws_ops_.find(id);
+                if (it != pending_ws_ops_.end()) {
+                    const auto& req = it->second;
+                    ExecutionReport report{};
+                    report.timestamp_ns = NowNs();
+                    report.SetInstrument(req.instrument.c_str());
+                    report.status = OrderStatus::REJECTED;
+                    report.side = req.side;
+                    if (!req.price.empty()) {
+                        report.price = std::stod(req.price);
+                    }
+                    if (!req.size.empty()) {
+                        report.total_volume = std::stod(req.size);
+                    }
+                    on_order_update_(report);
+                    pending_ws_ops_.erase(it);
+                }
+            }
+        } else if (op == "order" && !id.empty()) {
+            pending_ws_ops_.erase(id);
         }
         return;
     }

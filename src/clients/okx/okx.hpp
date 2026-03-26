@@ -44,6 +44,7 @@ class OkxClient : public ExchangeClient {
   public:
     std::vector<ExecutionReport> QueryPendingOrders(const std::string& inst_type);
     std::map<std::string, std::pair<double, double>> QueryBalances();
+    void FetchInstrumentCodes(const std::vector<std::string>& instruments);
 
   private:
     void DecodeTicker(const Json::Value& data, const std::string& instId);
@@ -60,4 +61,6 @@ class OkxClient : public ExchangeClient {
     static OrderStatus MapOkxState(const std::string& state);
 
     ExchangeConfig config_;
+    std::map<std::string, int> inst_id_codes_;
+    std::map<std::string, OrderRequest> pending_ws_ops_;
 };

@@ -19,7 +19,6 @@ struct GridLevel {
 
 class MeshStrategy : public Strategy {
   public:
-    void SetBalances(const std::map<std::string, std::pair<double, double>>& balances) override;
     void Init(const Json::Value& params) override;
     void Reconstruct(const std::vector<ExecutionReport>& pending_orders) override;
     void OnBBO(const BBO& bbo) override;
@@ -34,6 +33,8 @@ class MeshStrategy : public Strategy {
     bool TryAdoptOrder(const ExecutionReport& report);
 
     std::string instrument_;
+    std::string base_currency_;
+    std::string quote_currency_;
     double upper_price_ = 0.0;
     double lower_price_ = 0.0;
     int grid_count_ = 0;
@@ -41,8 +42,6 @@ class MeshStrategy : public Strategy {
     double grid_volume_ = 0.0;
     double fee_rate_ = 0.001;
 
-    double base_available_ = 0.0;
-    double quote_available_ = 0.0;
     std::vector<GridLevel> grids_;
     bool initialized_ = false;
     double total_profit_ = 0.0;

@@ -8,8 +8,8 @@
 
 template <typename EntryT, size_t Capacity = 4096>
 struct RingShm {
-    std::atomic<uint64_t> head{0};
-    std::atomic<uint64_t> tail{0};
+    alignas(64) std::atomic<uint64_t> head{0};
+    alignas(64) std::atomic<uint64_t> tail{0};
     EntryT entries[Capacity];
 
     static constexpr size_t capacity = Capacity;
@@ -21,7 +21,8 @@ inline RingShm<EntryT, Capacity>* shm_create(const char* name) {
     shm_unlink(name);
     size_t sz = RingShm<EntryT, Capacity>::shm_size();
     int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
-    if (fd < 0) return nullptr;
+    if (fd < 0)
+        return nullptr;
     if (ftruncate(fd, static_cast<off_t>(sz)) != 0) {
         close(fd);
         shm_unlink(name);
@@ -41,21 +42,25 @@ template <typename EntryT, size_t Capacity>
 inline RingShm<EntryT, Capacity>* shm_attach(const char* name) {
     size_t sz = RingShm<EntryT, Capacity>::shm_size();
     int fd = shm_open(name, O_RDWR, 0);
-    if (fd < 0) return nullptr;
+    if (fd < 0)
+        return nullptr;
     void* p = mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
-    if (p == MAP_FAILED) return nullptr;
+    if (p == MAP_FAILED)
+        return nullptr;
     return static_cast<RingShm<EntryT, Capacity>*>(p);
 }
 
 template <typename EntryT, size_t Capacity>
 inline void shm_detach(RingShm<EntryT, Capacity>* r) {
-    if (r) munmap(r, RingShm<EntryT, Capacity>::shm_size());
+    if (r)
+        munmap(r, RingShm<EntryT, Capacity>::shm_size());
 }
 
 template <typename EntryT, size_t Capacity>
 inline void shm_destroy(const char* name, RingShm<EntryT, Capacity>* r) {
-    if (r) munmap(r, RingShm<EntryT, Capacity>::shm_size());
+    if (r)
+        munmap(r, RingShm<EntryT, Capacity>::shm_size());
     shm_unlink(name);
 }
 
