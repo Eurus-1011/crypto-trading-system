@@ -1,24 +1,15 @@
 #include "mesh.hpp"
 
-void MeshStrategy::SetBalances(const std::map<std::string, std::pair<double, double>>& balances) {
-    auto dash_pos = instrument_.find('-');
-    if (dash_pos == std::string::npos) {
-        return;
-    }
-
-    std::string base = instrument_.substr(0, dash_pos);
-    std::string quote = instrument_.substr(dash_pos + 1);
-
-    if (auto it = balances.find(base); it != balances.end()) {
-        base_available_ = it->second.first;
-    }
-    if (auto it = balances.find(quote); it != balances.end()) {
-        quote_available_ = it->second.first;
-    }
-}
-
 void MeshStrategy::Init(const Json::Value& params) {
     instrument_ = params.get("instrument", "BTC-USDT").asString();
+    auto dash_pos = instrument_.find('-');
+    if (dash_pos == std::string::npos) {
+        ERROR("Mesh init failed: invalid instrument format: " + instrument_);
+        Stop();
+        return;
+    }
+    base_currency_ = instrument_.substr(0, dash_pos);
+    quote_currency_ = instrument_.substr(dash_pos + 1);
     upper_price_ = params.get("upper_price", 0.0).asDouble();
     lower_price_ = params.get("lower_price", 0.0).asDouble();
     grid_count_ = params.get("grid_count", 10).asInt();
@@ -123,8 +114,9 @@ void MeshStrategy::OnBBO(const BBO& bbo) {
 
     if (!initialized_) {
         double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
-        double quote_remaining = quote_available_;
-        double base_before = base_available_;
+        double quote_remaining = position_manager_->GetPosition(quote_currency_).available;
+        double quote_before = quote_remaining;
+        double base_before = position_manager_->GetPosition(base_currency_).available;
         int buy_count = 0;
         int sell_count = 0;
 
@@ -157,8 +149,8 @@ void MeshStrategy::OnBBO(const BBO& bbo) {
 
         INFO("Place initial grid orders: [MID_PRICE] " + std::to_string(mid_price) + ", [BUY_GRIDS] " +
              std::to_string(buy_count) + ", [SELL_GRIDS] " + std::to_string(sell_count) + ", [QUOTE_USED] " +
-             std::to_string(quote_available_ - quote_remaining) + ", [BASE_USED] " +
-             std::to_string(base_before - base_available_));
+             std::to_string(quote_before - quote_remaining) + ", [BASE_USED] " +
+             std::to_string(base_before - position_manager_->GetPosition(base_currency_).available));
         initialized_ = true;
     }
 }
@@ -181,6 +173,11 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
         return;
     }
 
+    if (grid_index < 0 && report.status == OrderStatus::REJECTED) {
+        GridState expected = (report.side == Side::BUY) ? GridState::BUY_PENDING : GridState::SELL_PENDING;
+        grid_index = FindGridByPriceAndState(report.price, expected);
+    }
+
     if (grid_index < 0) {
         return;
     }
@@ -196,7 +193,6 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::BOUGHT;
             grid.buy_fill_price = report.avg_fill_price;
             grid.order_id.clear();
-            base_available_ += std::floor(report.filled_volume * (1.0 - fee_rate_) * 1000.0) / 1000.0;
             INFO("Grid order filled: [INSTRUMENT] " + instrument_ + ", [SIDE] BUY, [GRID] " +
                  std::to_string(grid_index) + ", [PRICE] " + std::to_string(report.avg_fill_price) + ", [VOLUME] " +
                  std::to_string(report.filled_volume) + ", [FEE] " + std::to_string(fee));
@@ -235,7 +231,6 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::EMPTY;
         } else if (grid.state == GridState::SELL_PENDING) {
             grid.state = GridState::BOUGHT;
-            base_available_ += grid.volume;
         }
         grid.order_id.clear();
     } else if (report.status == OrderStatus::CANCEL_FAILED) {
@@ -248,7 +243,6 @@ void MeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::EMPTY;
         } else if (grid.state == GridState::SELL_PENDING) {
             grid.state = GridState::BOUGHT;
-            base_available_ += grid.volume;
         }
         grid.order_id.clear();
     }
@@ -333,14 +327,14 @@ void MeshStrategy::PlaceSellAtGrid(int grid_index) {
     if (grid.state != GridState::EMPTY && grid.state != GridState::BOUGHT) {
         return;
     }
-    if (base_available_ < grid.volume) {
+    if (position_manager_->GetPosition(base_currency_).available < grid.volume) {
         return;
     }
 
     grid.state = GridState::SELL_PENDING;
     grid.order_sent_ts_ns = NowNs();
     grid.order_id.clear();
-    base_available_ -= grid.volume;
+    position_manager_->Deduct(base_currency_, grid.volume);
     EmitSell(instrument_.c_str(), OrderType::LIMIT, grid.price, grid.volume);
 
     INFO("Place grid order: [INSTRUMENT] " + instrument_ + ", [SIDE] SELL, [GRID] " + std::to_string(grid_index) +

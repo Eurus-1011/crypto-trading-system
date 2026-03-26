@@ -31,10 +31,20 @@ void PositionManager::SyncFromExchange(const std::string& currency, double excha
     }
 }
 
+void PositionManager::Deduct(const std::string& currency, double amount) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    positions_[currency].available -= amount;
+}
+
+void PositionManager::Refund(const std::string& currency, double amount) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    positions_[currency].available += amount;
+}
+
 void PositionManager::UpdateOnNew(const ExecutionReport& report) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (report.side == Side::BUY) {
-        std::string quote_currency = ExtractQuoteCurrency(report.instrument);
+        std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
         auto& quote_pos = positions_[quote_currency];
         quote_pos.currency = quote_currency;
         double freeze_amount = report.price * report.total_volume;
@@ -44,11 +54,10 @@ void PositionManager::UpdateOnNew(const ExecutionReport& report) {
              ", [AVAILABLE] " + std::to_string(quote_pos.available) + ", [TOTAL_FROZEN] " +
              std::to_string(quote_pos.frozen));
     } else {
-        std::string base_currency = ExtractBaseCurrency(report.instrument);
+        std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_pos = positions_[base_currency];
         base_pos.currency = base_currency;
         double freeze_amount = report.total_volume;
-        base_pos.available -= freeze_amount;
         base_pos.frozen += freeze_amount;
         INFO("Freeze on new order: [CURRENCY] " + base_currency + ", [FROZEN] " + std::to_string(freeze_amount) +
              ", [AVAILABLE] " + std::to_string(base_pos.available) + ", [TOTAL_FROZEN] " +
@@ -58,8 +67,8 @@ void PositionManager::UpdateOnNew(const ExecutionReport& report) {
 
 void PositionManager::UpdateOnFill(const ExecutionReport& report) {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::string base_currency = ExtractBaseCurrency(report.instrument);
-    std::string quote_currency = ExtractQuoteCurrency(report.instrument);
+    std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
+    std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         auto& base_pos = positions_[base_currency];
@@ -100,7 +109,7 @@ void PositionManager::UpdateOnCancel(const ExecutionReport& report) {
         double remaining = report.total_volume - report.filled_volume;
         if (remaining > 1e-8) {
             if (report.side == Side::BUY) {
-                std::string quote_currency = ExtractQuoteCurrency(report.instrument);
+                std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
                 auto& quote_pos = positions_[quote_currency];
                 quote_pos.currency = quote_currency;
                 double release_amount = remaining * report.price;
@@ -110,7 +119,7 @@ void PositionManager::UpdateOnCancel(const ExecutionReport& report) {
                      std::to_string(release_amount) + ", [AVAILABLE] " + std::to_string(quote_pos.available) +
                      ", [TOTAL_FROZEN] " + std::to_string(quote_pos.frozen));
             } else {
-                std::string base_currency = ExtractBaseCurrency(report.instrument);
+                std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
                 auto& base_pos = positions_[base_currency];
                 base_pos.currency = base_currency;
                 base_pos.frozen -= remaining;
@@ -134,20 +143,13 @@ Position PositionManager::GetPosition(const std::string& currency) const {
     return Position{currency, 0.0, 0.0};
 }
 
-std::string PositionManager::ExtractBaseCurrency(const char* instrument) {
-    std::string inst(instrument);
-    auto dash_pos = inst.find('-');
-    if (dash_pos != std::string::npos) {
-        return inst.substr(0, dash_pos);
+void PositionManager::UpdateOnRejected(const ExecutionReport& report) {
+    if (report.side == Side::SELL) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
+        auto& base_pos = positions_[base_currency];
+        base_pos.available += report.total_volume;
+        INFO("Refund on rejected sell: [CURRENCY] " + base_currency + ", [REFUND] " +
+             std::to_string(report.total_volume) + ", [AVAILABLE] " + std::to_string(base_pos.available));
     }
-    return inst;
-}
-
-std::string PositionManager::ExtractQuoteCurrency(const char* instrument) {
-    std::string inst(instrument);
-    auto dash_pos = inst.find('-');
-    if (dash_pos != std::string::npos) {
-        return inst.substr(dash_pos + 1);
-    }
-    return inst;
 }

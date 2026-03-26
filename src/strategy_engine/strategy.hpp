@@ -3,8 +3,8 @@
 #include "common/quotation.hpp"
 #include "common/trading.hpp"
 #include "common/utils.hpp"
+#include "trading_engine/position_manager.hpp"
 
-#include <map>
 #include <vector>
 
 class Strategy {
@@ -12,9 +12,9 @@ class Strategy {
     virtual ~Strategy() = default;
 
     void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
+    void SetPositionManager(PositionManager* pm) { position_manager_ = pm; }
 
     virtual void Init(const Json::Value& params) = 0;
-    virtual void SetBalances(const std::map<std::string, std::pair<double, double>>& balances) {}
     virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
     virtual void OnTicker(const Ticker& ticker) {}
     virtual void OnBBO(const BBO& bbo) {}
@@ -32,5 +32,6 @@ class Strategy {
     void EmitCancel(const char* instrument, const char* order_id);
 
     SignalRing* signal_ring_ = nullptr;
+    PositionManager* position_manager_ = nullptr;
     std::atomic<bool> running_{true};
 };

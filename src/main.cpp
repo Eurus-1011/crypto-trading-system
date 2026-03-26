@@ -28,23 +28,6 @@ static void OnSignal(int) {
     }
 }
 
-static std::string GetPublicIP() {
-    std::array<char, 128> buffer;
-    std::string result;
-    FILE* pipe = popen("curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null", "r");
-    if (!pipe) {
-        return "unknown";
-    }
-    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-        result += buffer.data();
-    }
-    pclose(pipe);
-    if (result.empty()) {
-        return "unknown";
-    }
-    return result;
-}
-
 static std::string JoinStrings(const std::vector<std::string>& vec) {
     std::string result;
     for (size_t idx = 0; idx < vec.size(); ++idx) {
@@ -72,9 +55,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string public_ip = GetPublicIP();
-
-    INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [PUBLIC_IP] " + public_ip + ", [INSTRUMENTS] " +
+    INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [INSTRUMENTS] " +
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +
          JoinStrings(config.quotation_engine.channels) + ", [STRATEGY] " + config.strategy_engine.name);
 
@@ -104,10 +85,13 @@ int main(int argc, char* argv[]) {
 
     trading_engine.Init();
     strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
-    strategy_engine.SetBalances(trading_engine.GetBalances());
-    strategy_engine.SetFactory([](const std::string& name) -> std::unique_ptr<Strategy> {
+
+    PositionManager* position_manager = &trading_engine.GetPositionManager();
+    strategy_engine.SetFactory([position_manager](const std::string& name) -> std::unique_ptr<Strategy> {
         if (name == "mesh") {
-            return std::make_unique<MeshStrategy>();
+            auto strategy = std::make_unique<MeshStrategy>();
+            strategy->SetPositionManager(position_manager);
+            return strategy;
         }
         return nullptr;
     });

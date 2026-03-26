@@ -10,17 +10,17 @@ void TradingEngine::Init() {
     client_->LoginPrivate();
     INFO("Login private ws success");
 
-    balances_ = client_->QueryBalances();
-    position_manager_.InitFromExchange(balances_);
+    client_->FetchInstrumentCodes(config_.quotation_engine.instruments);
+
+    auto balances = client_->QueryBalances();
+    position_manager_.InitFromExchange(balances);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
 
-    client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen) {
-        position_manager_.SyncFromExchange(currency, available, frozen);
-    });
-
     std::thread listener_thread([this]() { RunOrderListener(); });
     listener_thread.detach();
+    std::thread reconcile_thread([this]() { RunReconciler(); });
+    reconcile_thread.detach();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     client_->SubscribePrivateChannel(OkxChannelOrders, "SPOT");
@@ -49,7 +49,7 @@ void TradingEngine::RunOrderDispatcher() {
     while (running_) {
         Signal signal{};
         if (!shm_pop(signal_ring_, signal)) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            _mm_pause();
             continue;
         }
 
@@ -78,6 +78,18 @@ void TradingEngine::RunOrderDispatcher() {
 
 void TradingEngine::RunOrderListener() { client_->StartPrivateListener(); }
 
+void TradingEngine::RunReconciler() {
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::minutes(5));
+        if (!running_)
+            break;
+        auto balances = client_->QueryBalances();
+        for (const auto& [currency, bal] : balances) {
+            position_manager_.SyncFromExchange(currency, bal.first, bal.second);
+        }
+    }
+}
+
 void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     shm_push(report_ring_, report);
 
@@ -92,6 +104,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         position_manager_.UpdateOnCancel(report);
         INFO(base_log);
     } else if (report.status == OrderStatus::REJECTED) {
+        position_manager_.UpdateOnRejected(report);
         ERROR(base_log);
     } else if (report.status == OrderStatus::NEW) {
         position_manager_.UpdateOnNew(report);
