@@ -3,8 +3,8 @@
 #include "common/quotation.hpp"
 #include "common/trading.hpp"
 #include "quotation_engine/quotation_engine.hpp"
-#include "strategy_engine/mesh.hpp"
 #include "strategy_engine/strategy_engine.hpp"
+#include "strategy_engine/strategy_registry.hpp"
 #include "trading_engine/trading_engine.hpp"
 
 #include <csignal>
@@ -87,13 +87,9 @@ int main(int argc, char* argv[]) {
     strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
 
     PositionManager* position_manager = &trading_engine.GetPositionManager();
-    strategy_engine.SetFactory([position_manager](const std::string& name) -> std::unique_ptr<Strategy> {
-        if (name == "mesh") {
-            auto strategy = std::make_unique<MeshStrategy>();
-            strategy->SetPositionManager(position_manager);
-            return strategy;
-        }
-        return nullptr;
+    strategy_engine.SetPositionManager(position_manager);
+    strategy_engine.SetFactory([&]() -> std::unique_ptr<Strategy> {
+        return StrategyRegistry::Instance().Create(config.strategy_engine.name);
     });
 
     std::thread quotation_thread([&]() { quotation_engine.Run(); });
