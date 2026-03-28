@@ -13,7 +13,7 @@ void TradingEngine::Init() {
     client_->FetchInstrumentCodes(config_.quotation_engine.instruments);
 
     auto balances = client_->QueryBalances();
-    position_manager_.InitFromExchange(balances);
+    position_manager_.InitSpotFromExchange(balances);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
 
@@ -29,7 +29,25 @@ void TradingEngine::Init() {
     client_->SubscribePrivateChannel(OkxChannelAccount, "");
     INFO("Subscribe account channel success");
 
-    pending_orders_ = client_->QueryPendingOrders("SPOT");
+    pending_orders_ = client_->QuerySpotPendingOrders();
+
+    bool has_swap = false;
+    for (const auto& instrument : config_.quotation_engine.instruments) {
+        if (DetectMarketType(instrument.c_str()) == MarketType::SWAP) {
+            has_swap = true;
+            break;
+        }
+    }
+    if (has_swap) {
+        client_->SubscribePrivateChannel(OkxChannelOrders, "SWAP");
+        INFO("Subscribe orders channel success: [INST_TYPE] SWAP");
+
+        auto swap_positions = client_->QuerySwapPositions();
+        position_manager_.InitSwapFromExchange(swap_positions);
+
+        auto swap_pending = client_->QuerySwapPendingOrders();
+        pending_orders_.insert(pending_orders_.end(), swap_pending.begin(), swap_pending.end());
+    }
 
     INFO("Trading engine init complete");
 }
@@ -62,6 +80,8 @@ void TradingEngine::RunOrderDispatcher() {
             request.instrument = signal.instrument;
             request.side = (signal.action == Action::BUY) ? Side::BUY : Side::SELL;
             request.order_type = signal.order_type;
+            request.market_type = signal.market_type;
+            request.position_side = signal.position_side;
             request.size = std::to_string(signal.volume);
             if (signal.order_type == OrderType::LIMIT) {
                 request.price = std::to_string(signal.price);
@@ -83,9 +103,18 @@ void TradingEngine::RunReconciler() {
         std::this_thread::sleep_for(std::chrono::minutes(5));
         if (!running_)
             break;
+
         auto balances = client_->QueryBalances();
-        for (const auto& [currency, bal] : balances) {
-            position_manager_.SyncFromExchange(currency, bal.first, bal.second);
+        for (const auto& [currency, balance] : balances) {
+            position_manager_.SyncSpotFromExchange(currency, balance.first, balance.second);
+        }
+
+        auto swap_positions = client_->QuerySwapPositions();
+        for (const auto& [instrument, side_map] : swap_positions) {
+            for (const auto& [position_side, swap_position] : side_map) {
+                position_manager_.SyncSwapFromExchange(instrument, position_side, swap_position.contracts,
+                                                       swap_position.average_opening_price);
+            }
         }
     }
 }
@@ -95,17 +124,29 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
                            std::string(report.instrument) + ", [STATUS] " + ToString(report.status);
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
-        position_manager_.UpdateOnFill(report);
+        if (report.market_type == MarketType::SWAP) {
+            position_manager_.UpdateSwapOnFill(report);
+        } else {
+            position_manager_.UpdateSpotOnFill(report);
+        }
         INFO(base_log + ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
              std::to_string(report.avg_fill_price));
     } else if (report.status == OrderStatus::CANCELLED) {
-        position_manager_.UpdateOnCancel(report);
+        if (report.market_type == MarketType::SWAP) {
+            position_manager_.UpdateSwapOnCancel(report);
+        } else {
+            position_manager_.UpdateSpotOnCancel(report);
+        }
         INFO(base_log);
     } else if (report.status == OrderStatus::REJECTED) {
-        position_manager_.UpdateOnRejected(report);
+        if (report.market_type == MarketType::SWAP) {
+            position_manager_.UpdateSwapOnRejected(report);
+        } else {
+            position_manager_.UpdateSpotOnRejected(report);
+        }
         ERROR(base_log);
     } else if (report.status == OrderStatus::NEW) {
-        position_manager_.UpdateOnNew(report);
+        position_manager_.UpdateSpotOnNew(report);
         INFO(base_log);
     }
 

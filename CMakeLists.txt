@@ -2,9 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 set(TARGET_NAME crypto-trading-system)
 
+set(CMAKE_C_COMPILER   clang-18)
+set(CMAKE_CXX_COMPILER clang++-18)
+
 project(${TARGET_NAME} LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

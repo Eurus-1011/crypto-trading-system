@@ -1,7 +1,6 @@
 #pragma once
 
-#include "common/quotation.hpp"
-#include "common/trading.hpp"
+#include "common/defs.hpp"
 #include "common/utils.hpp"
 #include "trading_engine/position_manager.hpp"
 
@@ -10,7 +9,7 @@ class Strategy {
     virtual ~Strategy() = default;
 
     void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
-    void SetPositionManager(PositionManager* pm) { position_manager_ = pm; }
+    void SetPositionManager(PositionManager* position_manager) { position_manager_ = position_manager; }
 
     virtual void Init(const Json::Value& params) = 0;
     virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
@@ -25,9 +24,13 @@ class Strategy {
     void Stop() { running_ = false; }
 
   protected:
-    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume);
-    void EmitSell(const char* instrument, OrderType order_type, double price, double volume);
-    void EmitCancel(const char* instrument, const char* order_id);
+    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume,
+                 MarketType market_type = MarketType::SPOT, PosSide position_side = PosSide::NET);
+
+    void EmitSell(const char* instrument, OrderType order_type, double price, double volume,
+                  MarketType market_type = MarketType::SPOT, PosSide position_side = PosSide::NET);
+
+    void EmitCancel(const char* instrument, const char* order_id, MarketType market_type = MarketType::SPOT);
 
     SignalRing* signal_ring_ = nullptr;
     PositionManager* position_manager_ = nullptr;
