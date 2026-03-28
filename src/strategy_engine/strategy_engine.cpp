@@ -11,13 +11,14 @@ void StrategyEngine::Run() {
         BindThreadToCpus(config_.strategy_engine.cpu_affinity);
     }
 
-    auto strategy = factory_ ? factory_(config_.strategy_engine.name) : nullptr;
+    auto strategy = factory_ ? factory_() : nullptr;
     if (!strategy) {
         ERROR("Unknown strategy: [NAME] " + config_.strategy_engine.name);
         return;
     }
 
     strategy->Bind(signal_ring_);
+    strategy->SetPositionManager(position_manager_);
     strategy->Init(config_.strategy_engine.params);
 
     if (!pending_orders_.empty()) {
