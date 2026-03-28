@@ -2,6 +2,7 @@
 
 #include "common/logger.hpp"
 #include "strategy_engine/strategy.hpp"
+#include "strategy_engine/strategy_registry.hpp"
 
 #include <chrono>
 #include <cmath>

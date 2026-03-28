@@ -1,7 +1,5 @@
 #include "multi_mesh.hpp"
 
-#include "strategy_registry.hpp"
-
 REGISTER_STRATEGY(MultiMeshStrategy)
 
 void MultiMeshStrategy::Init(const Json::Value& params) {

@@ -5,8 +5,6 @@
 #include "common/utils.hpp"
 #include "trading_engine/position_manager.hpp"
 
-#include <vector>
-
 class Strategy {
   public:
     virtual ~Strategy() = default;
