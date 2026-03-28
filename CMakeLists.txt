@@ -38,7 +38,7 @@ add_executable(${TARGET_NAME}
     src/quotation_engine/quotation_engine.cpp
     src/strategy_engine/strategy.cpp
     src/strategy_engine/strategy_engine.cpp
-    src/strategy_engine/mesh.cpp
+    src/strategy_engine/multi_mesh/multi_mesh.cpp
     src/trading_engine/trading_engine.cpp
     src/trading_engine/position_manager.cpp
 )
