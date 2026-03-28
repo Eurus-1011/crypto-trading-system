@@ -275,8 +275,10 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
               ", [ORDER_ID] " + std::string(report.order_id));
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
+            PlaceBuyAtGrid(mesh, grid_index);
         } else if (grid.state == GridState::SELL_PENDING) {
             grid.state = GridState::BOUGHT;
+            PlaceSellAtGrid(mesh, grid_index);
         }
         grid.order_id.clear();
     }

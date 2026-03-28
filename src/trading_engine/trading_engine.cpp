@@ -91,8 +91,6 @@ void TradingEngine::RunReconciler() {
 }
 
 void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
-    shm_push(report_ring_, report);
-
     std::string base_log = "Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
                            std::string(report.instrument) + ", [STATUS] " + ToString(report.status);
 
@@ -110,4 +108,6 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         position_manager_.UpdateOnNew(report);
         INFO(base_log);
     }
+
+    shm_push(report_ring_, report);
 }

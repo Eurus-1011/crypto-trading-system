@@ -151,5 +151,17 @@ void PositionManager::UpdateOnRejected(const ExecutionReport& report) {
         base_pos.available += report.total_volume;
         INFO("Refund on rejected sell: [CURRENCY] " + base_currency + ", [REFUND] " +
              std::to_string(report.total_volume) + ", [AVAILABLE] " + std::to_string(base_pos.available));
+    } else if (report.side == Side::BUY) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
+        auto& quote_pos = positions_[quote_currency];
+        double release_amount = report.price * report.total_volume;
+        if (quote_pos.frozen >= release_amount - 1e-8) {
+            quote_pos.frozen -= release_amount;
+            quote_pos.available += release_amount;
+            INFO("Release frozen on rejected buy: [CURRENCY] " + quote_currency + ", [RELEASED] " +
+                 std::to_string(release_amount) + ", [AVAILABLE] " + std::to_string(quote_pos.available) +
+                 ", [TOTAL_FROZEN] " + std::to_string(quote_pos.frozen));
+        }
     }
 }

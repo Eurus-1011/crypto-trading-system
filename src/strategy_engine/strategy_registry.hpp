@@ -50,5 +50,4 @@ struct StrategyRegistrar {
     }
 };
 
-#define REGISTER_STRATEGY(StrategyClassName)                                                                           \
-    static StrategyRegistrar<StrategyClassName> _##StrategyClassName(#StrategyClassName);
+#define REGISTER_STRATEGY(StrategyName) static StrategyRegistrar<StrategyName> _##StrategyName(#StrategyName);
