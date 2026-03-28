@@ -42,15 +42,19 @@ class OkxClient : public ExchangeClient {
     std::string GetPrivateWsPath() override;
 
   public:
-    std::vector<ExecutionReport> QueryPendingOrders(const std::string& inst_type);
+    std::vector<ExecutionReport> QuerySpotPendingOrders();
+    std::vector<ExecutionReport> QuerySwapPendingOrders();
     std::map<std::string, std::pair<double, double>> QueryBalances();
+    std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
     void FetchInstrumentCodes(const std::vector<std::string>& instruments);
 
   private:
-    void DecodeTicker(const Json::Value& data, const std::string& instId);
-    void DecodeBBO(const Json::Value& data, const std::string& instId);
-    void DecodeDepth(const Json::Value& data, const std::string& instId);
-    void DecodeTrade(const Json::Value& data, const std::string& instId);
+    std::vector<ExecutionReport> QueryPendingOrdersByType(const std::string& inst_type);
+
+    void DecodeTicker(const Json::Value& data, const std::string& inst_id);
+    void DecodeBBO(const Json::Value& data, const std::string& inst_id);
+    void DecodeDepth(const Json::Value& data, const std::string& inst_id);
+    void DecodeTrade(const Json::Value& data, const std::string& inst_id);
     void DecodeOrderUpdate(const Json::Value& data);
     void DecodeAccountUpdate(const Json::Value& data);
 
@@ -58,7 +62,8 @@ class OkxClient : public ExchangeClient {
     std::string IsoTimestampForRest() const;
     std::string Sign(const std::string& timestamp, const std::string& method, const std::string& path) const;
 
-    static OrderStatus MapOkxState(const std::string& state);
+    static OrderStatus MapOkxOrderState(const std::string& state);
+    static PosSide MapOkxPosSide(const std::string& pos_side);
 
     ExchangeConfig config_;
     std::map<std::string, int> inst_id_codes_;

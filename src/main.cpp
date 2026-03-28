@@ -1,7 +1,6 @@
 #include "common/config.hpp"
+#include "common/defs.hpp"
 #include "common/logger.hpp"
-#include "common/quotation.hpp"
-#include "common/trading.hpp"
 #include "quotation_engine/quotation_engine.hpp"
 #include "strategy_engine/strategy_engine.hpp"
 #include "strategy_engine/strategy_registry.hpp"

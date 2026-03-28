@@ -1,8 +1,7 @@
 #pragma once
 
+#include "common/defs.hpp"
 #include "common/logger.hpp"
-#include "common/quotation.hpp"
-#include "common/trading.hpp"
 #include "common/websocket.hpp"
 
 #include <chrono>

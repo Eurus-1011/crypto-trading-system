@@ -146,9 +146,9 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
 
     if (!mesh->initialized) {
         double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
-        double quote_remaining = position_manager_->GetPosition(mesh->quote_currency).available;
+        double quote_remaining = position_manager_->GetSpotPosition(mesh->quote_currency).available;
         double quote_before = quote_remaining;
-        double base_before = position_manager_->GetPosition(mesh->base_currency).available;
+        double base_before = position_manager_->GetSpotPosition(mesh->base_currency).available;
         int buy_count = 0;
         int sell_count = 0;
 
@@ -183,7 +183,7 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
              std::to_string(mid_price) + ", [BUY_GRIDS] " + std::to_string(buy_count) + ", [SELL_GRIDS] " +
              std::to_string(sell_count) + ", [QUOTE_USED] " + std::to_string(quote_before - quote_remaining) +
              ", [BASE_USED] " +
-             std::to_string(base_before - position_manager_->GetPosition(mesh->base_currency).available));
+             std::to_string(base_before - position_manager_->GetSpotPosition(mesh->base_currency).available));
         mesh->initialized = true;
     }
 }
@@ -376,14 +376,14 @@ void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
     if (grid.state != GridState::EMPTY && grid.state != GridState::BOUGHT) {
         return;
     }
-    if (position_manager_->GetPosition(mesh->base_currency).available < grid.volume) {
+    if (position_manager_->GetSpotPosition(mesh->base_currency).available < grid.volume) {
         return;
     }
 
     grid.state = GridState::SELL_PENDING;
     grid.order_sent_ts_ns = NowNs();
     grid.order_id.clear();
-    position_manager_->Deduct(mesh->base_currency, grid.volume);
+    position_manager_->DeductSpot(mesh->base_currency, grid.volume);
     EmitSell(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume);
 
     INFO("Place grid order, [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [GRID] " + std::to_string(grid_index) +
