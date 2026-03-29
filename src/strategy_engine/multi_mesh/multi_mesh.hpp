@@ -38,7 +38,6 @@ struct MeshConfig {
     double last_bid = 0.0;
     double last_ask = 0.0;
     uint64_t last_bbo_ts_ns = 0;
-    std::chrono::steady_clock::time_point last_heartbeat_ts{};
 };
 
 class MultiMeshStrategy : public Strategy {

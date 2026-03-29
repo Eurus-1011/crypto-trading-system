@@ -6,15 +6,20 @@
 
 #include <cmath>
 
-static PosSide ParsePosSide(const std::string& s) {
-    if (s == "long")
-        return PosSide::LONG;
-    else if (s == "short")
-        return PosSide::SHORT;
-    else if (s == "net")
-        return PosSide::NET;
-    else
-        std::unreachable();
+static bool ParsePosSide(const std::string& s, PosSide& out) {
+    if (s == "long") {
+        out = PosSide::LONG;
+        return true;
+    }
+    if (s == "short") {
+        out = PosSide::SHORT;
+        return true;
+    }
+    if (s == "net") {
+        out = PosSide::NET;
+        return true;
+    }
+    return false;
 }
 
 REGISTER_STRATEGY(MultiMeshStrategy)
@@ -56,16 +61,23 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     MeshConfig mesh;
     mesh.instrument = instrument;
-    mesh.base_currency = instrument.substr(0, dash_pos);
-    mesh.quote_currency = instrument.substr(dash_pos + 1);
     mesh.market_type = DetectMarketType(instrument.c_str());
+    mesh.base_currency = instrument.substr(0, dash_pos);
+    if (mesh.market_type == MarketType::SWAP) {
+        auto second_dash = instrument.find('-', dash_pos + 1);
+        mesh.quote_currency = (second_dash != std::string::npos)
+                                  ? instrument.substr(dash_pos + 1, second_dash - dash_pos - 1)
+                                  : instrument.substr(dash_pos + 1);
+    } else {
+        mesh.quote_currency = instrument.substr(dash_pos + 1);
+    }
 
     std::string position_side_str = config.get("position_side", "").asString();
-    if (position_side_str.empty()) {
-        ERROR("MultiMesh init failed, [REASON] missing 'position_side', [INSTRUMENT] " + instrument);
+    if (position_side_str.empty() || !ParsePosSide(position_side_str, mesh.position_side)) {
+        ERROR("MultiMesh init failed, [REASON] missing or invalid 'position_side': '" + position_side_str +
+              "', [INSTRUMENT] " + instrument);
         return;
     }
-    mesh.position_side = ParsePosSide(position_side_str);
     if (mesh.market_type == MarketType::SWAP && mesh.position_side == PosSide::NET) {
         WARN("MultiMesh: SWAP instrument with position_side=net, [INSTRUMENT] " + instrument);
     }

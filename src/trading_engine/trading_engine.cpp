@@ -153,7 +153,9 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         }
         ERROR(base_log);
     } else if (report.status == OrderStatus::NEW) {
-        position_manager_.UpdateSpotOnNew(report);
+        if (report.market_type != MarketType::SWAP) {
+            position_manager_.UpdateSpotOnNew(report);
+        }
         INFO(base_log);
     }
 
