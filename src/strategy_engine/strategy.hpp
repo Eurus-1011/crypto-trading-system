@@ -26,13 +26,13 @@ class Strategy {
     void Stop() { running_ = false; }
 
   protected:
-    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume,
-                 MarketType market_type = MarketType::SPOT, PosSide position_side = PosSide::NET);
+    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume, MarketType market_type,
+                 PosSide position_side);
 
-    void EmitSell(const char* instrument, OrderType order_type, double price, double volume,
-                  MarketType market_type = MarketType::SPOT, PosSide position_side = PosSide::NET);
+    void EmitSell(const char* instrument, OrderType order_type, double price, double volume, MarketType market_type,
+                  PosSide position_side);
 
-    void EmitCancel(const char* instrument, const char* order_id, MarketType market_type = MarketType::SPOT);
+    void EmitCancel(const char* instrument, const char* order_id, MarketType market_type);
 
     SignalRing* signal_ring_ = nullptr;
     PositionManager* position_manager_ = nullptr;

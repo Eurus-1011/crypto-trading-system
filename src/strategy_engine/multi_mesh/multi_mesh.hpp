@@ -20,6 +20,8 @@ struct MeshConfig {
     std::string instrument;
     std::string base_currency;
     std::string quote_currency;
+    MarketType market_type;
+    PosSide position_side;
     double upper_price = 0.0;
     double lower_price = 0.0;
     int grid_count = 0;
