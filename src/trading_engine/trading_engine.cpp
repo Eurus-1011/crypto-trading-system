@@ -1,5 +1,12 @@
 #include "trading_engine.hpp"
 
+#include "common/cpu_affinity.hpp"
+#include "common/logger.hpp"
+
+#include <chrono>
+#include <immintrin.h>
+#include <thread>
+
 TradingEngine::TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring)
     : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {}
 

@@ -1,9 +1,7 @@
 #pragma once
 
 #include "common/defs.hpp"
-#include "common/logger.hpp"
 
-#include <cmath>
 #include <map>
 #include <mutex>
 #include <utility>

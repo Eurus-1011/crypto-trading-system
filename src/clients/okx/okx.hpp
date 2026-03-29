@@ -2,8 +2,6 @@
 
 #include "clients/exchange_client.hpp"
 #include "common/config.hpp"
-#include "common/https.hpp"
-#include "common/utils.hpp"
 
 #include <map>
 

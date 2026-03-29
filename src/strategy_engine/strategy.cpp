@@ -1,5 +1,7 @@
 #include "strategy.hpp"
 
+#include "common/utils.hpp"
+
 void Strategy::EmitBuy(const char* instrument, OrderType order_type, double price, double volume,
                        MarketType market_type, PosSide position_side) {
     Signal signal{};

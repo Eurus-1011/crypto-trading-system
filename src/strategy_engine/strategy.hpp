@@ -1,8 +1,10 @@
 #pragma once
 
 #include "common/defs.hpp"
-#include "common/utils.hpp"
 #include "trading_engine/position_manager.hpp"
+
+#include <json/json.h>
+#include <vector>
 
 class Strategy {
   public:

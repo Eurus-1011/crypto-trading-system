@@ -1,9 +1,6 @@
 #pragma once
 
-#include <cerrno>
-#include <cstring>
 #include <sched.h>
-#include <string>
 #include <vector>
 
 inline bool BindThreadToCpus(const std::vector<int>& cpu_ids) {

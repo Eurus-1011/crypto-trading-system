@@ -1,5 +1,9 @@
 #include "okx.hpp"
 
+#include "common/https.hpp"
+#include "common/logger.hpp"
+#include "common/utils.hpp"
+
 OkxClient::OkxClient(const ExchangeConfig& config) : config_(config) {}
 
 std::string OkxClient::GetPublicWsHost() { return OkxPublicWsHost; }

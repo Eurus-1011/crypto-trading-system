@@ -1,5 +1,9 @@
 #include "position_manager.hpp"
 
+#include "common/logger.hpp"
+
+#include <cmath>
+
 void PositionManager::InitSpotFromExchange(const std::map<std::string, std::pair<double, double>>& balances) {
     std::lock_guard<std::mutex> lock(mutex_);
     spot_positions_.clear();

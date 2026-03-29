@@ -1,11 +1,8 @@
 #pragma once
 
-#include "common/logger.hpp"
 #include "strategy_engine/strategy.hpp"
-#include "strategy_engine/strategy_registry.hpp"
 
 #include <chrono>
-#include <cmath>
 #include <map>
 
 enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING };

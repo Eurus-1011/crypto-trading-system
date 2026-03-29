@@ -1,5 +1,9 @@
 #include "quotation_engine.hpp"
 
+#include "clients/okx/okx.hpp"
+#include "common/cpu_affinity.hpp"
+#include "common/logger.hpp"
+
 QuotationEngine::QuotationEngine(const SystemConfig& config, TickerRing* ticker_ring, BBORing* bbo_ring,
                                  DepthRing* depth_ring, TradeRing* trade_ring)
     : config_(config), ticker_ring_(ticker_ring), bbo_ring_(bbo_ring), depth_ring_(depth_ring),
