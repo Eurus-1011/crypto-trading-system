@@ -1,11 +1,8 @@
 #pragma once
 
-#include "common/logger.hpp"
 #include "strategy_engine/strategy.hpp"
-#include "strategy_engine/strategy_registry.hpp"
 
 #include <chrono>
-#include <cmath>
 #include <map>
 
 enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING };
@@ -23,6 +20,8 @@ struct MeshConfig {
     std::string instrument;
     std::string base_currency;
     std::string quote_currency;
+    MarketType market_type;
+    PosSide position_side;
     double upper_price = 0.0;
     double lower_price = 0.0;
     int grid_count = 0;
@@ -39,7 +38,6 @@ struct MeshConfig {
     double last_bid = 0.0;
     double last_ask = 0.0;
     uint64_t last_bbo_ts_ns = 0;
-    std::chrono::steady_clock::time_point last_heartbeat_ts{};
 };
 
 class MultiMeshStrategy : public Strategy {

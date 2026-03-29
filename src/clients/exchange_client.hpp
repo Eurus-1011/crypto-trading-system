@@ -1,17 +1,12 @@
 #pragma once
 
-#include "common/logger.hpp"
-#include "common/quotation.hpp"
-#include "common/trading.hpp"
+#include "common/defs.hpp"
 #include "common/websocket.hpp"
 
-#include <chrono>
-#include <cstdlib>
+#include <atomic>
 #include <functional>
 #include <json/json.h>
-#include <openssl/hmac.h>
-#include <sstream>
-#include <thread>
+#include <mutex>
 
 class ExchangeClient {
   public:

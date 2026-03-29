@@ -2,16 +2,15 @@
 
 #include "clients/exchange_client.hpp"
 #include "common/config.hpp"
-#include "common/https.hpp"
-#include "common/utils.hpp"
 
 #include <map>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 
-static constexpr const char* OkxPublicWsHost = "ws.okx.com";
-static constexpr const char* OkxPublicWsPort = "443";
+static constexpr const char* OkxWsHost = "ws.okx.com";
+static constexpr const char* OkxWsPort = "443";
 static constexpr const char* OkxPublicWsPath = "/ws/v5/public";
-static constexpr const char* OkxPrivateWsHost = "ws.okx.com";
-static constexpr const char* OkxPrivateWsPort = "443";
 static constexpr const char* OkxPrivateWsPath = "/ws/v5/private";
 static constexpr const char* OkxChannelTickers = "tickers";
 static constexpr const char* OkxChannelBBO = "bbo-tbt";
@@ -19,6 +18,65 @@ static constexpr const char* OkxChannelBooks5 = "books5";
 static constexpr const char* OkxChannelTrades = "trades";
 static constexpr const char* OkxChannelOrders = "orders";
 static constexpr const char* OkxChannelAccount = "account";
+
+inline const std::unordered_map<Side, const char*> kOkxSide = {
+    {Side::BUY, "buy"},
+    {Side::SELL, "sell"},
+};
+inline const std::unordered_map<PosSide, const char*> kOkxPosSide = {
+    {PosSide::NET, "net"},
+    {PosSide::LONG, "long"},
+    {PosSide::SHORT, "short"},
+};
+inline const std::unordered_map<OrderType, const char*> kOkxOrderType = {
+    {OrderType::MARKET, "market"},
+    {OrderType::LIMIT, "limit"},
+};
+inline const std::unordered_map<MarketType, const char*> kOkxTdMode = {
+    {MarketType::SPOT, "cash"},
+    {MarketType::SWAP, "cross"},
+};
+inline const std::unordered_map<MarketType, const char*> kOkxInstType = {
+    {MarketType::SPOT, "SPOT"},
+    {MarketType::SWAP, "SWAP"},
+};
+
+inline const std::unordered_map<std::string_view, Side> kOkxSideEnum = {
+    {"buy", Side::BUY},
+    {"sell", Side::SELL},
+};
+inline const std::unordered_map<std::string_view, PosSide> kOkxPosSideEnum = {
+    {"net", PosSide::NET},
+    {"long", PosSide::LONG},
+    {"short", PosSide::SHORT},
+};
+inline const std::unordered_map<std::string_view, MarketType> kOkxInstTypeEnum = {
+    {"SPOT", MarketType::SPOT},
+    {"SWAP", MarketType::SWAP},
+};
+inline const std::unordered_map<std::string_view, OrderStatus> kOkxOrderStateEnum = {
+    {"filled", OrderStatus::FILLED},
+    {"partially_filled", OrderStatus::PARTIALLY_FILLED},
+    {"canceled", OrderStatus::CANCELLED},
+    {"live", OrderStatus::NEW},
+};
+
+inline Side OkxParseSide(std::string_view s) {
+    auto it = kOkxSideEnum.find(s);
+    return it != kOkxSideEnum.end() ? it->second : Side::BUY;
+}
+inline PosSide OkxParsePosSide(std::string_view s) {
+    auto it = kOkxPosSideEnum.find(s);
+    return it != kOkxPosSideEnum.end() ? it->second : PosSide::NET;
+}
+inline MarketType OkxParseInstType(std::string_view s) {
+    auto it = kOkxInstTypeEnum.find(s);
+    return it != kOkxInstTypeEnum.end() ? it->second : MarketType::SPOT;
+}
+inline OrderStatus OkxParseOrderState(std::string_view s) {
+    auto it = kOkxOrderStateEnum.find(s);
+    return it != kOkxOrderStateEnum.end() ? it->second : OrderStatus::REJECTED;
+}
 
 class OkxClient : public ExchangeClient {
   public:
@@ -42,23 +100,25 @@ class OkxClient : public ExchangeClient {
     std::string GetPrivateWsPath() override;
 
   public:
-    std::vector<ExecutionReport> QueryPendingOrders(const std::string& inst_type);
+    std::vector<ExecutionReport> QuerySpotPendingOrders();
+    std::vector<ExecutionReport> QuerySwapPendingOrders();
     std::map<std::string, std::pair<double, double>> QueryBalances();
+    std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
     void FetchInstrumentCodes(const std::vector<std::string>& instruments);
 
   private:
-    void DecodeTicker(const Json::Value& data, const std::string& instId);
-    void DecodeBBO(const Json::Value& data, const std::string& instId);
-    void DecodeDepth(const Json::Value& data, const std::string& instId);
-    void DecodeTrade(const Json::Value& data, const std::string& instId);
+    std::vector<ExecutionReport> QueryPendingOrdersByType(const std::string& inst_type);
+
+    void DecodeTicker(const Json::Value& data, const std::string& inst_id);
+    void DecodeBBO(const Json::Value& data, const std::string& inst_id);
+    void DecodeDepth(const Json::Value& data, const std::string& inst_id);
+    void DecodeTrade(const Json::Value& data, const std::string& inst_id);
     void DecodeOrderUpdate(const Json::Value& data);
     void DecodeAccountUpdate(const Json::Value& data);
 
     std::string IsoTimestamp() const;
     std::string IsoTimestampForRest() const;
     std::string Sign(const std::string& timestamp, const std::string& method, const std::string& path) const;
-
-    static OrderStatus MapOkxState(const std::string& state);
 
     ExchangeConfig config_;
     std::map<std::string, int> inst_id_codes_;

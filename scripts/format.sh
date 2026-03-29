@@ -1,0 +1,7 @@
+#!/bin/sh
+
+cd "$(dirname "$0")/.."
+
+find . -type f -regex '.*\.\(cpp\|hpp\|c\|h\)$' -print |
+  while IFS= read -r f; do git check-ignore -q "$f" || printf '%s\n' "$f"; done |
+  xargs -r -I {} clang-format -i {}

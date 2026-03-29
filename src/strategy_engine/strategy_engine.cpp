@@ -1,5 +1,11 @@
 #include "strategy_engine.hpp"
 
+#include "common/cpu_affinity.hpp"
+#include "common/logger.hpp"
+
+#include <chrono>
+#include <immintrin.h>
+
 StrategyEngine::StrategyEngine(const SystemConfig& config, TickerRing* ticker_ring, BBORing* bbo_ring,
                                DepthRing* depth_ring, TradeRing* trade_ring, SignalRing* signal_ring,
                                ExecutionReportRing* report_ring)

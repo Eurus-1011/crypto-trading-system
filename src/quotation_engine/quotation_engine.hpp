@@ -1,7 +1,9 @@
 #pragma once
 
-#include "clients/okx/okx.hpp"
-#include "common/cpu_affinity.hpp"
+#include "common/config.hpp"
+#include "common/defs.hpp"
+
+class ExchangeClient;
 
 class QuotationEngine {
   public:

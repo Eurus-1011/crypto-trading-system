@@ -1,12 +1,12 @@
 #pragma once
 
-#include "common/logger.hpp"
-#include "common/trading.hpp"
+#include "common/defs.hpp"
 
-#include <cmath>
 #include <map>
+#include <mutex>
+#include <utility>
 
-struct Position {
+struct SpotPosition {
     std::string currency;
     double available = 0.0;
     double frozen = 0.0;
@@ -14,15 +14,23 @@ struct Position {
 
 class PositionManager {
   public:
-    void InitFromExchange(const std::map<std::string, std::pair<double, double>>& balances);
-    void SyncFromExchange(const std::string& currency, double exchange_available, double exchange_frozen);
-    void Deduct(const std::string& currency, double amount);
-    void Refund(const std::string& currency, double amount);
-    void UpdateOnNew(const ExecutionReport& report);
-    void UpdateOnFill(const ExecutionReport& report);
-    void UpdateOnCancel(const ExecutionReport& report);
-    void UpdateOnRejected(const ExecutionReport& report);
-    Position GetPosition(const std::string& currency) const;
+    void InitSpotFromExchange(const std::map<std::string, std::pair<double, double>>& balances);
+    void SyncSpotFromExchange(const std::string& currency, double exchange_available, double exchange_frozen);
+    void DeductSpot(const std::string& currency, double amount);
+    void RefundSpot(const std::string& currency, double amount);
+    void UpdateSpotOnNew(const ExecutionReport& report);
+    void UpdateSpotOnFill(const ExecutionReport& report);
+    void UpdateSpotOnCancel(const ExecutionReport& report);
+    void UpdateSpotOnRejected(const ExecutionReport& report);
+    SpotPosition GetSpotPosition(const std::string& currency) const;
+
+    void InitSwapFromExchange(const std::map<std::string, std::map<PosSide, SwapPosition>>& positions);
+    void SyncSwapFromExchange(const std::string& instrument, PosSide position_side, double contracts,
+                              double average_opening_price);
+    void UpdateSwapOnFill(const ExecutionReport& report);
+    void UpdateSwapOnCancel(const ExecutionReport& report);
+    void UpdateSwapOnRejected(const ExecutionReport& report);
+    SwapPosition GetSwapPosition(const std::string& instrument, PosSide position_side) const;
 
   private:
     enum class CurrencyPart { Base, Quote };
@@ -41,5 +49,6 @@ class PositionManager {
     }
 
     mutable std::mutex mutex_;
-    std::map<std::string, Position> positions_;
+    std::map<std::string, SpotPosition> spot_positions_;
+    std::map<std::pair<std::string, PosSide>, SwapPosition> swap_positions_;
 };

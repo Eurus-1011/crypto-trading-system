@@ -1,5 +1,13 @@
 #include "exchange_client.hpp"
 
+#include "common/logger.hpp"
+
+#include <chrono>
+#include <cstdlib>
+#include <openssl/hmac.h>
+#include <sstream>
+#include <thread>
+
 bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy_port) {
     const char* proxy_env = std::getenv("https_proxy");
     if (!proxy_env) {
