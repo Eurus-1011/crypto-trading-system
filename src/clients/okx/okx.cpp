@@ -6,34 +6,40 @@
 
 OkxClient::OkxClient(const ExchangeConfig& config) : config_(config) {}
 
-std::string OkxClient::GetPublicWsHost() { return OkxPublicWsHost; }
-std::string OkxClient::GetPublicWsPort() { return OkxPublicWsPort; }
+std::string OkxClient::GetPublicWsHost() { return OkxWsHost; }
+std::string OkxClient::GetPublicWsPort() { return OkxWsPort; }
 std::string OkxClient::GetPublicWsPath() { return OkxPublicWsPath; }
-std::string OkxClient::GetPrivateWsHost() { return OkxPrivateWsHost; }
-std::string OkxClient::GetPrivateWsPort() { return OkxPrivateWsPort; }
+std::string OkxClient::GetPrivateWsHost() { return OkxWsHost; }
+std::string OkxClient::GetPrivateWsPort() { return OkxWsPort; }
 std::string OkxClient::GetPrivateWsPath() { return OkxPrivateWsPath; }
 
 std::string OkxClient::BuildSubscribeMessage(const std::string& channel, const std::string& instrument) {
     Json::Value msg;
     msg["op"] = "subscribe";
+
     Json::Value arg;
     arg["channel"] = channel;
     arg["instId"] = instrument;
     msg["args"].append(arg);
+
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
+
     return Json::writeString(writer, msg);
 }
 
 std::string OkxClient::BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) {
     Json::Value msg;
     msg["op"] = "subscribe";
+
     Json::Value arg;
     arg["channel"] = channel;
     arg["instType"] = inst_type;
     msg["args"].append(arg);
+
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
+
     return Json::writeString(writer, msg);
 }
 
@@ -65,6 +71,7 @@ std::string OkxClient::BuildLoginMessage() {
 
     Json::Value msg;
     msg["op"] = "login";
+
     Json::Value arg;
     arg["apiKey"] = config_.api_key;
     arg["passphrase"] = config_.passphrase;
@@ -74,34 +81,29 @@ std::string OkxClient::BuildLoginMessage() {
 
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
+
     return Json::writeString(writer, msg);
 }
 
 std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
-    std::string side_str = (req.side == Side::BUY) ? "buy" : "sell";
-    std::string type_str = (req.order_type == OrderType::MARKET) ? "market" : "limit";
     std::string id = std::to_string(NowNs());
     pending_ws_ops_[id] = req;
 
     Json::Value msg;
     msg["id"] = id;
     msg["op"] = "order";
+
     Json::Value arg;
     arg["instIdCode"] = inst_id_codes_.count(req.instrument) ? inst_id_codes_.at(req.instrument) : 0;
-    arg["side"] = side_str;
-    arg["ordType"] = type_str;
+    arg["side"] = kOkxSide.at(req.side);
+    arg["ordType"] = kOkxOrderType.at(req.order_type);
     arg["sz"] = req.size;
+    arg["tdMode"] = kOkxTdMode.at(req.market_type);
 
     if (req.market_type == MarketType::SWAP) {
-        arg["tdMode"] = "cross";
-        arg["posSide"] = (req.position_side == PosSide::LONG)    ? "long"
-                         : (req.position_side == PosSide::SHORT) ? "short"
-                                                                 : "net";
-    } else {
-        arg["tdMode"] = "cash";
-        if (req.order_type == OrderType::MARKET && req.side == Side::BUY) {
-            arg["tgtCcy"] = req.target_currency.empty() ? "quote_ccy" : req.target_currency;
-        }
+        arg["posSide"] = kOkxPosSide.at(req.position_side);
+    } else if (req.order_type == OrderType::MARKET && req.side == Side::BUY) {
+        arg["tgtCcy"] = req.target_currency.empty() ? "quote_ccy" : req.target_currency;
     }
 
     if (req.order_type == OrderType::LIMIT && !req.price.empty()) {
@@ -118,12 +120,15 @@ std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, co
     Json::Value msg;
     msg["id"] = std::to_string(NowNs());
     msg["op"] = "cancel-order";
+
     Json::Value arg;
     arg["instIdCode"] = inst_id_codes_.count(instrument) ? inst_id_codes_.at(instrument) : 0;
     arg["ordId"] = order_id;
     msg["args"].append(arg);
+
     Json::StreamWriterBuilder writer;
     writer["indentation"] = "";
+
     return Json::writeString(writer, msg);
 }
 
@@ -132,8 +137,8 @@ void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments
     DetectHttpProxy(proxy_host, proxy_port);
 
     for (const auto& instrument : instruments) {
-        std::string inst_type = (DetectMarketType(instrument.c_str()) == MarketType::SWAP) ? "SWAP" : "SPOT";
-        std::string path = "/api/v5/public/instruments?instType=" + inst_type + "&instId=" + instrument;
+        const char* inst_type = kOkxInstType.at(DetectMarketType(instrument.c_str()));
+        std::string path = std::string("/api/v5/public/instruments?instType=") + inst_type + "&instId=" + instrument;
         std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, "", "", proxy_host, proxy_port);
         if (raw_body.empty()) {
             WARN("FetchInstrumentCodes failed: [INSTRUMENT] " + instrument);
@@ -204,16 +209,16 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             break;
         }
 
-        MarketType market_type = (inst_type == "SWAP") ? MarketType::SWAP : MarketType::SPOT;
+        MarketType market_type = OkxParseInstType(inst_type);
         for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
             ExecutionReport report{};
             report.timestamp_ns = NowNs();
-            report.SetInstrument(data[idx].get("instId", "").asString().c_str());
-            report.SetOrderId(data[idx].get("ordId", "").asString().c_str());
-            report.status = MapOkxOrderState(data[idx].get("state", "").asString());
-            report.side = (data[idx].get("side", "buy").asString() == "buy") ? Side::BUY : Side::SELL;
+            report.SetInstrument(data[idx].get("instId", "").asCString());
+            report.SetOrderId(data[idx].get("ordId", "").asCString());
+            report.status = OkxParseOrderState(data[idx].get("state", "").asCString());
+            report.side = OkxParseSide(data[idx].get("side", "buy").asCString());
             report.market_type = market_type;
-            report.position_side = MapOkxPosSide(data[idx].get("posSide", "net").asString());
+            report.position_side = OkxParsePosSide(data[idx].get("posSide", "net").asCString());
             report.price = ParseDouble(data[idx]["px"]);
             report.filled_volume = ParseDouble(data[idx]["accFillSz"]);
             report.total_volume = ParseDouble(data[idx]["sz"]);
@@ -326,7 +331,7 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
     auto& data = root["data"];
     for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
         std::string instrument = data[idx].get("instId", "").asString();
-        PosSide position_side = MapOkxPosSide(data[idx].get("posSide", "net").asString());
+        PosSide position_side = OkxParsePosSide(data[idx].get("posSide", "net").asCString());
         double contracts = ParseDouble(data[idx]["pos"]);
         double average_opening_price = ParseDouble(data[idx]["avgPx"]);
         double unrealized_profit_loss = ParseDouble(data[idx]["upl"]);
@@ -345,26 +350,6 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
         }
     }
     return result;
-}
-
-OrderStatus OkxClient::MapOkxOrderState(const std::string& state) {
-    if (state == "filled")
-        return OrderStatus::FILLED;
-    if (state == "partially_filled")
-        return OrderStatus::PARTIALLY_FILLED;
-    if (state == "canceled")
-        return OrderStatus::CANCELLED;
-    if (state == "live")
-        return OrderStatus::NEW;
-    return OrderStatus::REJECTED;
-}
-
-PosSide OkxClient::MapOkxPosSide(const std::string& pos_side) {
-    if (pos_side == "long")
-        return PosSide::LONG;
-    if (pos_side == "short")
-        return PosSide::SHORT;
-    return PosSide::NET;
 }
 
 void OkxClient::OnPublicMessage(const std::string& raw) {
@@ -471,17 +456,17 @@ void OkxClient::DecodeOrderUpdate(const Json::Value& data) {
     ExecutionReport report{};
     report.timestamp_ns = NowNs();
     report.SetInstrument(inst_id.c_str());
-    report.SetOrderId(data.get("ordId", "").asString().c_str());
-    report.status = MapOkxOrderState(data.get("state", "").asString());
-    report.side = (data.get("side", "buy").asString() == "buy") ? Side::BUY : Side::SELL;
+    report.SetOrderId(data.get("ordId", "").asCString());
+    report.status = OkxParseOrderState(data.get("state", "").asCString());
+    report.side = OkxParseSide(data.get("side", "buy").asCString());
     report.market_type = DetectMarketType(inst_id.c_str());
-    report.position_side = MapOkxPosSide(data.get("posSide", "net").asString());
+    report.position_side = OkxParsePosSide(data.get("posSide", "net").asCString());
     report.price = ParseDouble(data["px"]);
     report.filled_volume = ParseDouble(data["accFillSz"]);
     report.total_volume = ParseDouble(data["sz"]);
     report.avg_fill_price = ParseDouble(data["avgPx"]);
     report.fee = ParseDouble(data["fillFee"]);
-    report.SetFeeCurrency(data.get("feeCcy", "").asString().c_str());
+    report.SetFeeCurrency(data.get("feeCcy", "").asCString());
     on_order_update_(report);
 }
 
@@ -573,12 +558,11 @@ void OkxClient::DecodeTrade(const Json::Value& data, const std::string& inst_id)
     trade.local_ts_ns = NowNs();
     trade.SetInstrument(inst_id.c_str());
     trade.market_type = DetectMarketType(inst_id.c_str());
-    std::string trade_id_str = data.get("tradeId", "").asString();
-    std::strncpy(trade.trade_id, trade_id_str.c_str(), sizeof(trade.trade_id) - 1);
+    std::strncpy(trade.trade_id, data.get("tradeId", "").asCString(), sizeof(trade.trade_id) - 1);
     trade.trade_id[sizeof(trade.trade_id) - 1] = '\0';
     trade.price = ParseDouble(data["px"]);
     trade.volume = ParseDouble(data["sz"]);
-    trade.side = (data.get("side", "buy").asString() == "buy") ? Side::BUY : Side::SELL;
+    trade.side = OkxParseSide(data.get("side", "buy").asCString());
     on_trade_(trade);
 }
 
