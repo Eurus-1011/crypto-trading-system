@@ -1,15 +1,10 @@
 #pragma once
 
 #include "common/config.hpp"
-#include "common/cpu_affinity.hpp"
-#include "common/logger.hpp"
 #include "strategy_engine/strategy.hpp"
 
-#include <chrono>
 #include <functional>
-#include <immintrin.h>
 #include <memory>
-#include <thread>
 
 class StrategyEngine {
   public:

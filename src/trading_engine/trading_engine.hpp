@@ -1,10 +1,8 @@
 #pragma once
 
 #include "clients/okx/okx.hpp"
-#include "common/cpu_affinity.hpp"
 #include "trading_engine/position_manager.hpp"
 
-#include <immintrin.h>
 #include <memory>
 
 class TradingEngine {
