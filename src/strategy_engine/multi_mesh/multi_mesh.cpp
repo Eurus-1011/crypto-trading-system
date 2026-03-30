@@ -312,6 +312,10 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
                  ", [ROUND_TRIPS] " + std::to_string(mesh->total_round_trips));
 
             if (buy_grid >= 0) {
+                if (mesh->grids[buy_grid].state == GridState::BOUGHT) {
+                    mesh->grids[buy_grid].state = GridState::EMPTY;
+                    mesh->grids[buy_grid].buy_fill_price = 0.0;
+                }
                 PlaceBuyAtGrid(mesh, buy_grid);
             }
         }
