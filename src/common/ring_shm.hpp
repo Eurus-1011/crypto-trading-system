@@ -66,24 +66,22 @@ inline void shm_destroy(const char* name, RingShm<EntryT, Capacity>* r) {
 
 template <typename EntryT, size_t Capacity>
 inline bool shm_push(RingShm<EntryT, Capacity>* r, const EntryT& e) {
-    uint64_t slot = r->tail.fetch_add(1, std::memory_order_acq_rel);
-    if (slot >= r->head.load(std::memory_order_acquire) + Capacity) {
-        r->tail.fetch_sub(1, std::memory_order_acq_rel);
+    uint64_t tail = r->tail.load(std::memory_order_relaxed);
+    if (tail - r->head.load(std::memory_order_acquire) >= Capacity) {
         return false;
     }
-    r->entries[slot % Capacity] = e;
-    std::atomic_thread_fence(std::memory_order_release);
+    r->entries[tail % Capacity] = e;
+    r->tail.store(tail + 1, std::memory_order_release);
     return true;
 }
 
 template <typename EntryT, size_t Capacity>
 inline bool shm_pop(RingShm<EntryT, Capacity>* r, EntryT& e) {
-    uint64_t slot = r->head.fetch_add(1, std::memory_order_acq_rel);
-    if (slot >= r->tail.load(std::memory_order_acquire)) {
-        r->head.fetch_sub(1, std::memory_order_acq_rel);
+    uint64_t head = r->head.load(std::memory_order_relaxed);
+    if (head >= r->tail.load(std::memory_order_acquire)) {
         return false;
     }
-    std::atomic_thread_fence(std::memory_order_acquire);
-    e = r->entries[slot % Capacity];
+    e = r->entries[head % Capacity];
+    r->head.store(head + 1, std::memory_order_release);
     return true;
 }
