@@ -25,11 +25,13 @@ struct MeshConfig {
     double upper_price = 0.0;
     double lower_price = 0.0;
     int grid_count = 0;
+    int active_grid_count = 0;
     double grid_step = 0.0;
     double grid_volume = 0.0;
 
     std::vector<GridLevel> grids;
     bool initialized = false;
+    int mid_grid_idx = -1;
 
     double total_profit = 0.0;
     double total_fee = 0.0;
