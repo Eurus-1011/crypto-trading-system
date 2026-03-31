@@ -64,6 +64,7 @@ void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
         auto& base_position = spot_positions_[base_currency];
         base_position.currency = base_currency;
         double freeze_amount = report.total_volume;
+        base_position.available -= freeze_amount;
         base_position.frozen += freeze_amount;
         INFO("Freeze on new order: [CURRENCY] " + base_currency + ", [FROZEN] " + std::to_string(freeze_amount) +
              ", [AVAILABLE] " + std::to_string(base_position.available) + ", [TOTAL_FROZEN] " +
@@ -77,24 +78,33 @@ void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
     std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
+        std::string order_id = std::string(report.order_id);
+        double last_acc = spot_order_fill_tracker_[order_id];
+        double incremental = report.filled_volume - last_acc;
+        spot_order_fill_tracker_[order_id] = report.filled_volume;
+        if (report.status == OrderStatus::FILLED) {
+            spot_order_fill_tracker_.erase(order_id);
+        }
+        if (incremental < 1e-8) {
+            return;
+        }
+
         auto& base_position = spot_positions_[base_currency];
         auto& quote_position = spot_positions_[quote_currency];
         base_position.currency = base_currency;
         quote_position.currency = quote_currency;
 
         if (report.side == Side::BUY) {
-            double quote_consumed = report.avg_fill_price * report.filled_volume;
-            quote_position.frozen -= quote_consumed;
-            base_position.available += report.filled_volume;
+            quote_position.frozen -= report.avg_fill_price * incremental;
+            base_position.available += incremental;
             if (std::string(report.fee_currency) == base_currency) {
                 base_position.available += report.fee;
             } else if (std::string(report.fee_currency) == quote_currency) {
                 quote_position.available += report.fee;
             }
         } else {
-            double quote_received = report.avg_fill_price * report.filled_volume;
-            base_position.frozen -= report.filled_volume;
-            quote_position.available += quote_received;
+            base_position.frozen -= incremental;
+            quote_position.available += report.avg_fill_price * incremental;
             if (std::string(report.fee_currency) == quote_currency) {
                 quote_position.available += report.fee;
             } else if (std::string(report.fee_currency) == base_currency) {
@@ -137,6 +147,7 @@ void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report) {
         }
         INFO("Order cancelled: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
              std::string(report.instrument));
+        spot_order_fill_tracker_.erase(std::string(report.order_id));
     }
 }
 
@@ -145,9 +156,12 @@ void PositionManager::UpdateSpotOnRejected(const ExecutionReport& report) {
         std::lock_guard<std::mutex> lock(mutex_);
         std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_position = spot_positions_[base_currency];
-        base_position.available += report.total_volume;
-        INFO("Refund on rejected sell: [CURRENCY] " + base_currency + ", [REFUND] " +
-             std::to_string(report.total_volume) + ", [AVAILABLE] " + std::to_string(base_position.available));
+        if (base_position.frozen >= report.total_volume - 1e-8) {
+            base_position.frozen -= report.total_volume;
+            base_position.available += report.total_volume;
+            INFO("Release frozen on rejected sell: [CURRENCY] " + base_currency + ", [RELEASED] " +
+                 std::to_string(report.total_volume) + ", [AVAILABLE] " + std::to_string(base_position.available));
+        }
     } else if (report.side == Side::BUY) {
         std::lock_guard<std::mutex> lock(mutex_);
         std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
@@ -211,6 +225,17 @@ void PositionManager::UpdateSwapOnFill(const ExecutionReport& report) {
     position.instrument = instrument;
     position.position_side = report.position_side;
 
+    std::string order_id = std::string(report.order_id);
+    double last_acc = swap_order_fill_tracker_[order_id];
+    double incremental = report.filled_volume - last_acc;
+    swap_order_fill_tracker_[order_id] = report.filled_volume;
+    if (report.status == OrderStatus::FILLED) {
+        swap_order_fill_tracker_.erase(order_id);
+    }
+    if (incremental < 1e-8) {
+        return;
+    }
+
     bool is_opening = false;
     switch (report.position_side) {
     case PosSide::NET:
@@ -225,9 +250,9 @@ void PositionManager::UpdateSwapOnFill(const ExecutionReport& report) {
     }
 
     if (is_opening) {
-        position.contracts += report.filled_volume;
+        position.contracts += incremental;
     } else {
-        position.contracts -= report.filled_volume;
+        position.contracts -= incremental;
         if (position.contracts < 0.0) {
             position.contracts = 0.0;
         }
@@ -239,6 +264,7 @@ void PositionManager::UpdateSwapOnFill(const ExecutionReport& report) {
 }
 
 void PositionManager::UpdateSwapOnCancel(const ExecutionReport& report) {
+    swap_order_fill_tracker_.erase(std::string(report.order_id));
     INFO("Swap order cancelled: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
          std::string(report.instrument));
 }

@@ -56,6 +56,7 @@ class MultiMeshStrategy : public Strategy {
     bool TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& report);
     void PlaceBuyAtGrid(MeshConfig* mesh, int grid_index);
     void PlaceSellAtGrid(MeshConfig* mesh, int grid_index);
+    void ReleaseSell(MeshConfig* mesh, int grid_index);
     void InitMesh(const Json::Value& config, double fee_rate);
 
     std::map<std::string, MeshConfig> meshes_;
