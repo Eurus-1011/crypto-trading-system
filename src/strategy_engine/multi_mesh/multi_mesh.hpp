@@ -5,7 +5,7 @@
 #include <chrono>
 #include <map>
 
-enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING };
+enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING, CANCEL_PENDING };
 
 struct GridLevel {
     double price;
