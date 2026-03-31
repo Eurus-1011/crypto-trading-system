@@ -259,7 +259,7 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
 
     if (new_mid > old_mid) {
         for (int idx = old_lo; idx < new_lo; ++idx) {
-            if (mesh->grids[idx].state == GridState::BUY_PENDING) {
+            if (mesh->grids[idx].state == GridState::BUY_PENDING && !mesh->grids[idx].order_id.empty()) {
                 EmitCancel(mesh->instrument.c_str(), mesh->grids[idx].order_id.c_str(), mesh->market_type);
             }
         }
@@ -268,7 +268,7 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
         }
     } else {
         for (int idx = new_hi + 1; idx <= old_hi; ++idx) {
-            if (mesh->grids[idx].state == GridState::SELL_PENDING &&
+            if (mesh->grids[idx].state == GridState::SELL_PENDING && !mesh->grids[idx].order_id.empty() &&
                 (idx == 0 || mesh->grids[idx - 1].state != GridState::BOUGHT)) {
                 EmitCancel(mesh->instrument.c_str(), mesh->grids[idx].order_id.c_str(), mesh->market_type);
             }
@@ -292,6 +292,14 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
         grid_index = FindGridByPriceAndState(mesh, report.price, expected);
         if (grid_index >= 0) {
             mesh->grids[grid_index].order_id = report.order_id;
+            int lo = std::max(0, mesh->mid_grid_idx - mesh->active_grid_count + 1);
+            int hi = std::min(mesh->grid_count, mesh->mid_grid_idx + mesh->active_grid_count);
+            if (report.side == Side::BUY && grid_index < lo) {
+                EmitCancel(mesh->instrument.c_str(), report.order_id, mesh->market_type);
+            } else if (report.side == Side::SELL && grid_index > hi &&
+                       (grid_index == 0 || mesh->grids[grid_index - 1].state != GridState::BOUGHT)) {
+                EmitCancel(mesh->instrument.c_str(), report.order_id, mesh->market_type);
+            }
         }
         return;
     }
