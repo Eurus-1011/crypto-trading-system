@@ -12,7 +12,6 @@ struct GridLevel {
     double volume;
     GridState state = GridState::EMPTY;
     std::string order_id;
-    double buy_fill_price = 0.0;
 };
 
 struct MeshConfig {
@@ -31,9 +30,6 @@ struct MeshConfig {
     std::vector<GridLevel> grids;
     bool initialized = false;
     int mid_grid_idx = -1;
-
-    double total_profit = 0.0;
-    int total_round_trips = 0;
 
     double last_bid = 0.0;
     double last_ask = 0.0;
@@ -55,7 +51,6 @@ class MultiMeshStrategy : public Strategy {
     bool TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& report);
     void PlaceBuyAtGrid(MeshConfig* mesh, int grid_index);
     void PlaceSellAtGrid(MeshConfig* mesh, int grid_index);
-    void ReleaseSell(MeshConfig* mesh, int grid_index);
     void InitMesh(const Json::Value& config, double fee_rate);
 
     std::map<std::string, MeshConfig> meshes_;
