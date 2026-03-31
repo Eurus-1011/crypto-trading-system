@@ -7,6 +7,13 @@
 #include <immintrin.h>
 #include <thread>
 
+static std::string LockedCurrency(const char* instrument, Side side) {
+    const char* dash = std::strchr(instrument, '-');
+    if (!dash)
+        return instrument;
+    return (side == Side::SELL) ? std::string(instrument, dash) : std::string(dash + 1);
+}
+
 TradingEngine::TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring)
     : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {}
 
@@ -94,10 +101,6 @@ void TradingEngine::RunOrderDispatcher() {
                 request.price = std::to_string(signal.price);
             }
 
-            std::string price_str = request.price.empty() ? "MARKET" : request.price;
-            INFO("Send place order: [INSTRUMENT] " + request.instrument + ", [SIDE] " +
-                 std::string(ToString(request.side)) + ", [PRICE] " + price_str + ", [VOLUME] " + request.size);
-
             client_->SendPlaceOrder(request);
         }
     }
@@ -127,8 +130,9 @@ void TradingEngine::RunReconciler() {
 }
 
 void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
-    std::string base_log = "Receive execution report: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
-                           std::string(report.instrument) + ", [STATUS] " + ToString(report.status);
+    std::string order_id = std::string(report.order_id);
+    std::string instrument = std::string(report.instrument);
+    std::string side_str = ToString(report.side);
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         if (report.market_type == MarketType::SWAP) {
@@ -136,27 +140,44 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         } else {
             position_manager_.UpdateSpotOnFill(report);
         }
-        INFO(base_log + ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
-             std::to_string(report.avg_fill_price));
+        if (report.status == OrderStatus::PARTIALLY_FILLED) {
+            INFO("Order partially filled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " +
+                 side_str + ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [TOTAL_VOLUME] " +
+                 std::to_string(report.total_volume) + ", [AVG_PRICE] " + std::to_string(report.avg_fill_price));
+        } else {
+            INFO("Order filled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
+                 ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
+                 std::to_string(report.avg_fill_price));
+        }
     } else if (report.status == OrderStatus::CANCELLED) {
         if (report.market_type == MarketType::SWAP) {
             position_manager_.UpdateSwapOnCancel(report);
+            INFO("Order cancelled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str);
         } else {
             position_manager_.UpdateSpotOnCancel(report);
+            double remaining = report.total_volume - report.filled_volume;
+            std::string currency = LockedCurrency(report.instrument, report.side);
+            double available = position_manager_.GetSpotPosition(currency).available;
+            INFO("Order cancelled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
+                 ", [REMAINING] " + std::to_string(remaining) + ", [AVAILABLE] " + std::to_string(available));
         }
-        INFO(base_log);
     } else if (report.status == OrderStatus::REJECTED) {
         if (report.market_type == MarketType::SWAP) {
             position_manager_.UpdateSwapOnRejected(report);
         } else {
             position_manager_.UpdateSpotOnRejected(report);
         }
-        ERROR(base_log);
     } else if (report.status == OrderStatus::NEW) {
         if (report.market_type != MarketType::SWAP) {
             position_manager_.UpdateSpotOnNew(report);
+            std::string currency = LockedCurrency(report.instrument, report.side);
+            auto pos = position_manager_.GetSpotPosition(currency);
+            INFO("Order new: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
+                 ", [PRICE] " + std::to_string(report.price) + ", [VOLUME] " + std::to_string(report.total_volume) +
+                 ", [AVAILABLE] " + std::to_string(pos.available) + ", [FROZEN] " + std::to_string(pos.frozen));
+        } else {
+            INFO("Order new: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str);
         }
-        INFO(base_log);
     }
 
     shm_push(report_ring_, report);
