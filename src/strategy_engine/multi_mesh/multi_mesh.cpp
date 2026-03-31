@@ -159,6 +159,9 @@ bool MultiMeshStrategy::TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& r
                 if (mesh->grids[idx].state == GridState::EMPTY || mesh->grids[idx].state == GridState::BOUGHT) {
                     mesh->grids[idx].state = GridState::SELL_PENDING;
                     mesh->grids[idx].order_id = report.order_id;
+                    if (mesh->market_type == MarketType::SPOT) {
+                        position_manager_->DeductSpot(mesh->base_currency, mesh->grids[idx].volume);
+                    }
                     if (idx > 0 && mesh->grids[idx - 1].state == GridState::EMPTY) {
                         mesh->grids[idx - 1].state = GridState::BOUGHT;
                         mesh->grids[idx - 1].buy_fill_price = mesh->grids[idx - 1].price;
@@ -324,10 +327,10 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
              ", [ORDER_ID] " + std::string(report.order_id));
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
+            grid.order_id.clear();
         } else if (grid.state == GridState::SELL_PENDING) {
-            grid.state = GridState::BOUGHT;
+            ReleaseSell(mesh, grid_index);
         }
-        grid.order_id.clear();
     } else if (report.status == OrderStatus::CANCEL_FAILED) {
         INFO("Grid cancel failed, likely already filled, [INSTRUMENT] " + mesh->instrument + ", [GRID] " +
              std::to_string(grid_index) + ", [ORDER_ID] " + std::string(report.order_id));
@@ -336,12 +339,12 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
               ", [ORDER_ID] " + std::string(report.order_id));
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
+            grid.order_id.clear();
             PlaceBuyAtGrid(mesh, grid_index);
         } else if (grid.state == GridState::SELL_PENDING) {
-            grid.state = GridState::BOUGHT;
+            ReleaseSell(mesh, grid_index);
             PlaceSellAtGrid(mesh, grid_index);
         }
-        grid.order_id.clear();
     }
 }
 
@@ -409,6 +412,15 @@ int MultiMeshStrategy::FindGridByPriceAndState(MeshConfig* mesh, double price, G
         }
     }
     return -1;
+}
+
+void MultiMeshStrategy::ReleaseSell(MeshConfig* mesh, int grid_index) {
+    auto& grid = mesh->grids[grid_index];
+    if (mesh->market_type == MarketType::SPOT) {
+        position_manager_->RefundSpot(mesh->base_currency, grid.volume);
+    }
+    grid.state = GridState::BOUGHT;
+    grid.order_id.clear();
 }
 
 void MultiMeshStrategy::PlaceBuyAtGrid(MeshConfig* mesh, int grid_index) {
