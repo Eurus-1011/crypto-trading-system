@@ -84,16 +84,19 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     mesh.upper_price = config.get("upper_price", 0.0).asDouble();
     mesh.lower_price = config.get("lower_price", 0.0).asDouble();
-    mesh.grid_count = config.get("grid_count", 10).asInt();
+    double grid_size = config.get("grid_size", 0.0).asDouble();
+    mesh.active_grid_count = config.get("active_grid_count", 0).asInt();
     mesh.grid_volume = config.get("grid_volume", 0.0).asDouble();
 
-    if (mesh.upper_price <= mesh.lower_price || mesh.grid_count <= 0 || mesh.grid_volume <= 0) {
+    if (mesh.upper_price <= mesh.lower_price || grid_size <= 0 || mesh.grid_volume <= 0 ||
+        mesh.active_grid_count <= 0) {
         ERROR("MultiMesh init failed, [REASON] invalid params, [INSTRUMENT] " + instrument + ", [UPPER] " +
-              std::to_string(mesh.upper_price) + ", [LOWER] " + std::to_string(mesh.lower_price) + ", [GRID_COUNT] " +
-              std::to_string(mesh.grid_count));
+              std::to_string(mesh.upper_price) + ", [LOWER] " + std::to_string(mesh.lower_price) + ", [GRID_SIZE] " +
+              std::to_string(grid_size) + ", [ACTIVE_GRID_COUNT] " + std::to_string(mesh.active_grid_count));
         return;
     }
 
+    mesh.grid_count = static_cast<int>(std::round((mesh.upper_price - mesh.lower_price) / grid_size));
     mesh.grid_step = (mesh.upper_price - mesh.lower_price) / mesh.grid_count;
     double mid_price = (mesh.upper_price + mesh.lower_price) / 2.0;
     double grid_profit_rate = mesh.grid_step / mid_price;
@@ -114,9 +117,9 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     INFO("MultiMesh instrument init success, [INSTRUMENT] " + instrument + ", [RANGE] " +
          std::to_string(mesh.lower_price) + " ~ " + std::to_string(mesh.upper_price) + ", [GRIDS] " +
-         std::to_string(mesh.grid_count) + ", [STEP] " + std::to_string(mesh.grid_step) + ", [GRID_VOLUME] " +
-         std::to_string(mesh.grid_volume) + ", [NET_PROFIT_RATE] " +
-         std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%");
+         std::to_string(mesh.grid_count) + ", [ACTIVE_GRID_COUNT] " + std::to_string(mesh.active_grid_count) +
+         ", [STEP] " + std::to_string(mesh.grid_step) + ", [GRID_VOLUME] " + std::to_string(mesh.grid_volume) +
+         ", [NET_PROFIT_RATE] " + std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%");
 
     meshes_[instrument] = std::move(mesh);
 }
@@ -184,8 +187,13 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
     mesh->last_ask = bbo.ask_price;
     mesh->last_bbo_ts_ns = bbo.local_ts_ns;
 
+    double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
+    int new_mid = std::clamp(static_cast<int>((mid_price - mesh->lower_price) / mesh->grid_step), 0, mesh->grid_count);
+
     if (!mesh->initialized) {
-        double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
+        mesh->mid_grid_idx = new_mid;
+        int lo = std::max(0, new_mid - mesh->active_grid_count + 1);
+        int hi = std::min(mesh->grid_count, new_mid + mesh->active_grid_count);
         int buy_count = 0;
         int sell_count = 0;
 
@@ -193,20 +201,16 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
             double initial_quote_available = position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency);
             double initial_base_available = position_manager_->GetEffectiveAvailableSpot(mesh->base_currency);
 
-            for (int idx = mesh->grid_count; idx >= 0; --idx) {
-                if (mesh->grids[idx].state != GridState::EMPTY)
-                    continue;
+            for (int idx = new_mid; idx >= lo; --idx) {
                 if (mesh->grids[idx].price >= mid_price - mesh->grid_step * 0.5)
                     continue;
-                double cost = mesh->grids[idx].price * mesh->grids[idx].volume;
-                if (position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency) < cost)
+                if (position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency) <
+                    mesh->grids[idx].price * mesh->grids[idx].volume)
                     break;
                 PlaceBuyAtGrid(mesh, idx);
                 ++buy_count;
             }
-            for (int idx = 0; idx <= mesh->grid_count; ++idx) {
-                if (mesh->grids[idx].state != GridState::EMPTY)
-                    continue;
+            for (int idx = new_mid + 1; idx <= hi; ++idx) {
                 if (mesh->grids[idx].price < mid_price + mesh->grid_step * 0.5)
                     continue;
                 PlaceSellAtGrid(mesh, idx);
@@ -221,17 +225,13 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
                  std::to_string(initial_base_available -
                                 position_manager_->GetEffectiveAvailableSpot(mesh->base_currency)));
         } else {
-            for (int idx = mesh->grid_count; idx >= 0; --idx) {
-                if (mesh->grids[idx].state != GridState::EMPTY)
-                    continue;
+            for (int idx = new_mid; idx >= lo; --idx) {
                 if (mesh->grids[idx].price >= mid_price - mesh->grid_step * 0.5)
                     continue;
                 PlaceBuyAtGrid(mesh, idx);
                 ++buy_count;
             }
-            for (int idx = 0; idx <= mesh->grid_count; ++idx) {
-                if (mesh->grids[idx].state != GridState::EMPTY)
-                    continue;
+            for (int idx = new_mid + 1; idx <= hi; ++idx) {
                 if (mesh->grids[idx].price < mid_price + mesh->grid_step * 0.5)
                     continue;
                 PlaceSellAtGrid(mesh, idx);
@@ -242,6 +242,40 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
                  std::to_string(sell_count));
         }
         mesh->initialized = true;
+        return;
+    }
+
+    if (new_mid == mesh->mid_grid_idx) {
+        return;
+    }
+
+    int old_mid = mesh->mid_grid_idx;
+    mesh->mid_grid_idx = new_mid;
+
+    int old_lo = std::max(0, old_mid - mesh->active_grid_count + 1);
+    int old_hi = std::min(mesh->grid_count, old_mid + mesh->active_grid_count);
+    int new_lo = std::max(0, new_mid - mesh->active_grid_count + 1);
+    int new_hi = std::min(mesh->grid_count, new_mid + mesh->active_grid_count);
+
+    if (new_mid > old_mid) {
+        for (int idx = old_lo; idx < new_lo; ++idx) {
+            if (mesh->grids[idx].state == GridState::BUY_PENDING) {
+                EmitCancel(mesh->instrument.c_str(), mesh->grids[idx].order_id.c_str(), mesh->market_type);
+            }
+        }
+        for (int idx = old_hi + 1; idx <= new_hi; ++idx) {
+            PlaceSellAtGrid(mesh, idx);
+        }
+    } else {
+        for (int idx = new_hi + 1; idx <= old_hi; ++idx) {
+            if (mesh->grids[idx].state == GridState::SELL_PENDING &&
+                (idx == 0 || mesh->grids[idx - 1].state != GridState::BOUGHT)) {
+                EmitCancel(mesh->instrument.c_str(), mesh->grids[idx].order_id.c_str(), mesh->market_type);
+            }
+        }
+        for (int idx = new_lo; idx < old_lo; ++idx) {
+            PlaceBuyAtGrid(mesh, idx);
+        }
     }
 }
 
