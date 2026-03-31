@@ -136,8 +136,8 @@ void MultiMeshStrategy::Reconstruct(const std::vector<ExecutionReport>& pending_
         } else {
             EmitCancel(report.instrument, report.order_id, report.market_type);
             ++cancelled;
-            INFO("Cancel unmatched pending order, [ORDER_ID] " + std::string(report.order_id) + ", [PRICE] " +
-                 std::to_string(report.price) + ", [SIDE] " + ToString(report.side));
+            INFO("Cancel unmatched order: [ORDER_ID] " + std::string(report.order_id) + ", [SIDE] " +
+                 ToString(report.side) + ", [PRICE] " + std::to_string(report.price));
         }
     }
 
@@ -151,24 +151,20 @@ bool MultiMeshStrategy::TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& r
             if (report.side == Side::BUY && mesh->grids[idx].state == GridState::EMPTY) {
                 mesh->grids[idx].state = GridState::BUY_PENDING;
                 mesh->grids[idx].order_id = report.order_id;
-                INFO("Adopt existing BUY order, [INSTRUMENT] " + mesh->instrument + ", [GRID] " + std::to_string(idx) +
-                     ", [ORDER_ID] " + std::string(report.order_id) + ", [PRICE] " + std::to_string(report.price));
+                INFO("Adopt order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] BUY, [PRICE] " +
+                     std::to_string(report.price) + ", [ORDER_ID] " + std::string(report.order_id));
                 return true;
             }
             if (report.side == Side::SELL) {
                 if (mesh->grids[idx].state == GridState::EMPTY || mesh->grids[idx].state == GridState::BOUGHT) {
                     mesh->grids[idx].state = GridState::SELL_PENDING;
                     mesh->grids[idx].order_id = report.order_id;
-                    if (mesh->market_type == MarketType::SPOT) {
-                        position_manager_->DeductSpot(mesh->base_currency, mesh->grids[idx].volume);
-                    }
                     if (idx > 0 && mesh->grids[idx - 1].state == GridState::EMPTY) {
                         mesh->grids[idx - 1].state = GridState::BOUGHT;
                         mesh->grids[idx - 1].buy_fill_price = mesh->grids[idx - 1].price;
                     }
-                    INFO("Adopt existing SELL order, [INSTRUMENT] " + mesh->instrument + ", [GRID] " +
-                         std::to_string(idx) + ", [ORDER_ID] " + std::string(report.order_id) + ", [PRICE] " +
-                         std::to_string(report.price));
+                    INFO("Adopt order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [PRICE] " +
+                         std::to_string(report.price) + ", [ORDER_ID] " + std::string(report.order_id));
                     return true;
                 }
             }
@@ -194,9 +190,8 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
         int sell_count = 0;
 
         if (mesh->market_type == MarketType::SPOT) {
-            double quote_remaining = position_manager_->GetSpotPosition(mesh->quote_currency).available;
-            double quote_before = quote_remaining;
-            double base_before = position_manager_->GetSpotPosition(mesh->base_currency).available;
+            double initial_quote_available = position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency);
+            double initial_base_available = position_manager_->GetEffectiveAvailableSpot(mesh->base_currency);
 
             for (int idx = mesh->grid_count; idx >= 0; --idx) {
                 if (mesh->grids[idx].state != GridState::EMPTY)
@@ -204,10 +199,9 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
                 if (mesh->grids[idx].price >= mid_price - mesh->grid_step * 0.5)
                     continue;
                 double cost = mesh->grids[idx].price * mesh->grids[idx].volume;
-                if (quote_remaining < cost)
+                if (position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency) < cost)
                     break;
                 PlaceBuyAtGrid(mesh, idx);
-                quote_remaining -= cost;
                 ++buy_count;
             }
             for (int idx = 0; idx <= mesh->grid_count; ++idx) {
@@ -220,9 +214,12 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
             }
             INFO("Place initial grid orders, [INSTRUMENT] " + mesh->instrument + ", [MID_PRICE] " +
                  std::to_string(mid_price) + ", [BUY_GRIDS] " + std::to_string(buy_count) + ", [SELL_GRIDS] " +
-                 std::to_string(sell_count) + ", [QUOTE_USED] " + std::to_string(quote_before - quote_remaining) +
+                 std::to_string(sell_count) + ", [QUOTE_USED] " +
+                 std::to_string(initial_quote_available -
+                                position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency)) +
                  ", [BASE_USED] " +
-                 std::to_string(base_before - position_manager_->GetSpotPosition(mesh->base_currency).available));
+                 std::to_string(initial_base_available -
+                                position_manager_->GetEffectiveAvailableSpot(mesh->base_currency)));
         } else {
             for (int idx = mesh->grid_count; idx >= 0; --idx) {
                 if (mesh->grids[idx].state != GridState::EMPTY)
@@ -261,8 +258,6 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
         grid_index = FindGridByPriceAndState(mesh, report.price, expected);
         if (grid_index >= 0) {
             mesh->grids[grid_index].order_id = report.order_id;
-            INFO("Assign order id to grid, [INSTRUMENT] " + mesh->instrument + ", [GRID] " +
-                 std::to_string(grid_index) + ", [ORDER_ID] " + std::string(report.order_id));
         }
         return;
     }
@@ -287,9 +282,6 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::BOUGHT;
             grid.buy_fill_price = report.avg_fill_price;
             grid.order_id.clear();
-            INFO("Grid order filled, [INSTRUMENT] " + mesh->instrument + ", [SIDE] BUY, [GRID] " +
-                 std::to_string(grid_index) + ", [PRICE] " + std::to_string(report.avg_fill_price) + ", [VOLUME] " +
-                 std::to_string(report.filled_volume) + ", [FEE] " + std::to_string(fee));
 
             if (grid_index < mesh->grid_count) {
                 PlaceSellAtGrid(mesh, grid_index + 1);
@@ -307,12 +299,11 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
 
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
-            INFO("Grid order filled, [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [GRID] " +
-                 std::to_string(grid_index) + ", [BUY_PRICE] " + std::to_string(buy_price) + ", [SELL_PRICE] " +
-                 std::to_string(report.avg_fill_price) + ", [VOLUME] " + std::to_string(report.filled_volume) +
-                 ", [NET_PROFIT] " + std::to_string(net_profit) + ", [TOTAL_PROFIT] " +
-                 std::to_string(mesh->total_profit) + ", [TOTAL_FEE] " + std::to_string(mesh->total_fee) +
-                 ", [ROUND_TRIPS] " + std::to_string(mesh->total_round_trips));
+            INFO("Grid profit: [INSTRUMENT] " + mesh->instrument + ", [BUY_PRICE] " + std::to_string(buy_price) +
+                 ", [SELL_PRICE] " + std::to_string(report.avg_fill_price) + ", [VOLUME] " +
+                 std::to_string(report.filled_volume) + ", [NET_PROFIT] " + std::to_string(net_profit) +
+                 ", [TOTAL_PROFIT] " + std::to_string(mesh->total_profit) + ", [ROUND_TRIPS] " +
+                 std::to_string(mesh->total_round_trips));
 
             if (buy_grid >= 0) {
                 if (mesh->grids[buy_grid].state == GridState::BOUGHT) {
@@ -323,8 +314,6 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             }
         }
     } else if (report.status == OrderStatus::CANCELLED) {
-        INFO("Grid order cancelled, [INSTRUMENT] " + mesh->instrument + ", [GRID] " + std::to_string(grid_index) +
-             ", [ORDER_ID] " + std::string(report.order_id));
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
@@ -332,11 +321,9 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             ReleaseSell(mesh, grid_index);
         }
     } else if (report.status == OrderStatus::CANCEL_FAILED) {
-        INFO("Grid cancel failed, likely already filled, [INSTRUMENT] " + mesh->instrument + ", [GRID] " +
-             std::to_string(grid_index) + ", [ORDER_ID] " + std::string(report.order_id));
+        INFO("Cancel failed, likely already filled: [ORDER_ID] " + std::string(report.order_id) + ", [INSTRUMENT] " +
+             mesh->instrument + ", [SIDE] " + ToString(report.side));
     } else if (report.status == OrderStatus::REJECTED) {
-        ERROR("Grid order rejected, [INSTRUMENT] " + mesh->instrument + ", [GRID] " + std::to_string(grid_index) +
-              ", [ORDER_ID] " + std::string(report.order_id));
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
@@ -416,9 +403,6 @@ int MultiMeshStrategy::FindGridByPriceAndState(MeshConfig* mesh, double price, G
 
 void MultiMeshStrategy::ReleaseSell(MeshConfig* mesh, int grid_index) {
     auto& grid = mesh->grids[grid_index];
-    if (mesh->market_type == MarketType::SPOT) {
-        position_manager_->RefundSpot(mesh->base_currency, grid.volume);
-    }
     grid.state = GridState::BOUGHT;
     grid.order_id.clear();
 }
@@ -438,8 +422,9 @@ void MultiMeshStrategy::PlaceBuyAtGrid(MeshConfig* mesh, int grid_index) {
     EmitBuy(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
             mesh->position_side);
 
-    INFO("Place grid order, [INSTRUMENT] " + mesh->instrument + ", [SIDE] BUY, [GRID] " + std::to_string(grid_index) +
-         ", [PRICE] " + std::to_string(grid.price) + ", [VOLUME] " + std::to_string(grid.volume));
+    INFO("Place order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] BUY, [PRICE] " + std::to_string(grid.price) +
+         ", [VOLUME] " + std::to_string(grid.volume) + ", [EFFECTIVE_AVAILABLE] " +
+         std::to_string(position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency)));
 }
 
 void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
@@ -451,7 +436,7 @@ void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
         return;
     }
     if (mesh->market_type == MarketType::SPOT) {
-        if (position_manager_->GetSpotPosition(mesh->base_currency).available < grid.volume) {
+        if (position_manager_->GetEffectiveAvailableSpot(mesh->base_currency) < grid.volume) {
             return;
         }
     } else {
@@ -463,12 +448,10 @@ void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
     grid.state = GridState::SELL_PENDING;
     grid.order_sent_ts_ns = NowNs();
     grid.order_id.clear();
-    if (mesh->market_type == MarketType::SPOT) {
-        position_manager_->DeductSpot(mesh->base_currency, grid.volume);
-    }
     EmitSell(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
              mesh->position_side);
 
-    INFO("Place grid order, [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [GRID] " + std::to_string(grid_index) +
-         ", [PRICE] " + std::to_string(grid.price) + ", [VOLUME] " + std::to_string(grid.volume));
+    INFO("Place order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [PRICE] " + std::to_string(grid.price) +
+         ", [VOLUME] " + std::to_string(grid.volume) + ", [EFFECTIVE_AVAILABLE] " +
+         std::to_string(position_manager_->GetEffectiveAvailableSpot(mesh->base_currency)));
 }
