@@ -12,7 +12,6 @@ struct GridLevel {
     double volume;
     GridState state = GridState::EMPTY;
     std::string order_id;
-    uint64_t order_sent_ts_ns = 0;
     double buy_fill_price = 0.0;
 };
 
@@ -34,12 +33,10 @@ struct MeshConfig {
     int mid_grid_idx = -1;
 
     double total_profit = 0.0;
-    double total_fee = 0.0;
     int total_round_trips = 0;
 
     double last_bid = 0.0;
     double last_ask = 0.0;
-    uint64_t last_bbo_ts_ns = 0;
 };
 
 class MultiMeshStrategy : public Strategy {
