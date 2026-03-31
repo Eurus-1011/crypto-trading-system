@@ -1,7 +1,6 @@
 #include "multi_mesh.hpp"
 
 #include "common/logger.hpp"
-#include "common/utils.hpp"
 #include "strategy_engine/strategy_registry.hpp"
 
 #include <cmath>
@@ -185,7 +184,6 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
 
     mesh->last_bid = bbo.bid_price;
     mesh->last_ask = bbo.ask_price;
-    mesh->last_bbo_ts_ns = bbo.local_ts_ns;
 
     double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
     int new_mid = std::clamp(static_cast<int>((mid_price - mesh->lower_price) / mesh->grid_step), 0, mesh->grid_count);
@@ -322,7 +320,6 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
     if (report.status == OrderStatus::FILLED) {
         double fill_value = report.avg_fill_price * report.filled_volume;
         double fee = fill_value * fee_rate_;
-        mesh->total_fee += fee;
 
         if (grid.state == GridState::BUY_PENDING ||
             (grid.state == GridState::CANCEL_PENDING && report.side == Side::BUY)) {
@@ -377,10 +374,8 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
         if (grid.state == GridState::BUY_PENDING) {
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
-            PlaceBuyAtGrid(mesh, grid_index);
         } else if (grid.state == GridState::SELL_PENDING) {
             ReleaseSell(mesh, grid_index);
-            PlaceSellAtGrid(mesh, grid_index);
         } else if (grid.state == GridState::CANCEL_PENDING) {
             if (report.side == Side::BUY) {
                 grid.state = GridState::EMPTY;
@@ -475,9 +470,13 @@ void MultiMeshStrategy::PlaceBuyAtGrid(MeshConfig* mesh, int grid_index) {
     if (grid.state != GridState::EMPTY) {
         return;
     }
+    if (mesh->market_type == MarketType::SPOT) {
+        if (position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency) < grid.price * grid.volume) {
+            return;
+        }
+    }
 
     grid.state = GridState::BUY_PENDING;
-    grid.order_sent_ts_ns = NowNs();
     grid.order_id.clear();
     EmitBuy(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
             mesh->position_side);
@@ -506,7 +505,6 @@ void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
     }
 
     grid.state = GridState::SELL_PENDING;
-    grid.order_sent_ts_ns = NowNs();
     grid.order_id.clear();
     EmitSell(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
              mesh->position_side);
