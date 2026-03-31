@@ -16,8 +16,8 @@ class PositionManager {
   public:
     void InitSpotFromExchange(const std::map<std::string, std::pair<double, double>>& balances);
     void SyncSpotFromExchange(const std::string& currency, double exchange_available, double exchange_frozen);
-    void DeductSpot(const std::string& currency, double amount);
-    void RefundSpot(const std::string& currency, double amount);
+    void ReserveSpot(const std::string& currency, double amount);
+    double GetEffectiveAvailableSpot(const std::string& currency) const;
     void UpdateSpotOnNew(const ExecutionReport& report);
     void UpdateSpotOnFill(const ExecutionReport& report);
     void UpdateSpotOnCancel(const ExecutionReport& report);
@@ -49,8 +49,9 @@ class PositionManager {
     }
 
     mutable std::mutex mutex_;
-    std::map<std::string, SpotPosition> spot_positions_;
+    std::unordered_map<std::string, SpotPosition> spot_positions_;
     std::map<std::pair<std::string, PosSide>, SwapPosition> swap_positions_;
     std::unordered_map<std::string, double> spot_order_fill_tracker_;
     std::unordered_map<std::string, double> swap_order_fill_tracker_;
+    std::unordered_map<std::string, double> spot_reserved_;
 };
