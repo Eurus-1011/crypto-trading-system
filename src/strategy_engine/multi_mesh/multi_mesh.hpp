@@ -5,14 +5,13 @@
 #include <chrono>
 #include <map>
 
-enum class GridState : int8_t { EMPTY, BUY_PENDING, BOUGHT, SELL_PENDING, CANCEL_PENDING };
+enum class GridState : int8_t { EMPTY, BUY_PENDING, SELL_PENDING, CANCEL_PENDING };
 
 struct GridLevel {
     double price;
     double volume;
     GridState state = GridState::EMPTY;
     std::string order_id;
-    double buy_fill_price = 0.0;
 };
 
 struct MeshConfig {
@@ -29,11 +28,7 @@ struct MeshConfig {
     double grid_volume = 0.0;
 
     std::vector<GridLevel> grids;
-    bool initialized = false;
-    int mid_grid_idx = -1;
-
-    double total_profit = 0.0;
-    int total_round_trips = 0;
+    int center_grid_idx = -1;
 
     double last_bid = 0.0;
     double last_ask = 0.0;
@@ -55,7 +50,7 @@ class MultiMeshStrategy : public Strategy {
     bool TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& report);
     void PlaceBuyAtGrid(MeshConfig* mesh, int grid_index);
     void PlaceSellAtGrid(MeshConfig* mesh, int grid_index);
-    void ReleaseSell(MeshConfig* mesh, int grid_index);
+    void Rebalance(MeshConfig* mesh);
     void InitMesh(const Json::Value& config, double fee_rate);
 
     std::map<std::string, MeshConfig> meshes_;
