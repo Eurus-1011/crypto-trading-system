@@ -25,7 +25,7 @@ REGISTER_STRATEGY(MultiMeshStrategy)
 
 void MultiMeshStrategy::Init(const Json::Value& params) {
     if (!params.isMember("mesh") || !params["mesh"].isArray()) {
-        ERROR("MultiMesh init failed, [REASON] missing or invalid 'mesh' array");
+        ERROR("MultiMesh init failed: [REASON] missing or invalid 'mesh' array");
         Stop();
         return;
     }
@@ -38,12 +38,13 @@ void MultiMeshStrategy::Init(const Json::Value& params) {
     }
 
     if (meshes_.empty()) {
-        ERROR("MultiMesh init failed, [REASON] no valid mesh configured");
+        ERROR("MultiMesh init failed: [REASON] no valid mesh configured");
         Stop();
         return;
     }
 
-    INFO("MultiMesh init success, [MESH_COUNT] " + std::to_string(meshes_.size()));
+    INFO("MultiMesh init success: [MESH_COUNT] " + std::to_string(meshes_.size()));
+    last_heartbeat_ts_ = std::chrono::steady_clock::now();
 }
 
 void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
@@ -54,7 +55,7 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     auto dash_pos = instrument.find('-');
     if (dash_pos == std::string::npos) {
-        ERROR("MultiMesh init failed, [REASON] invalid instrument format, [INSTRUMENT] " + instrument);
+        ERROR("MultiMesh init failed: [REASON] invalid instrument format, [INSTRUMENT] " + instrument);
         return;
     }
 
@@ -73,7 +74,7 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     std::string position_side_str = config.get("position_side", "").asString();
     if (position_side_str.empty() || !ParsePosSide(position_side_str, mesh.position_side)) {
-        ERROR("MultiMesh init failed, [REASON] missing or invalid 'position_side': '" + position_side_str +
+        ERROR("MultiMesh init failed: [REASON] missing or invalid 'position_side': '" + position_side_str +
               "', [INSTRUMENT] " + instrument);
         return;
     }
@@ -89,7 +90,7 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
 
     if (mesh.upper_price <= mesh.lower_price || grid_size <= 0 || mesh.grid_volume <= 0 ||
         mesh.active_grid_count <= 0) {
-        ERROR("MultiMesh init failed, [REASON] invalid params, [INSTRUMENT] " + instrument + ", [UPPER] " +
+        ERROR("MultiMesh init failed: [REASON] invalid params, [INSTRUMENT] " + instrument + ", [UPPER] " +
               std::to_string(mesh.upper_price) + ", [LOWER] " + std::to_string(mesh.lower_price) + ", [GRID_SIZE] " +
               std::to_string(grid_size) + ", [ACTIVE_GRID_COUNT] " + std::to_string(mesh.active_grid_count));
         return;
@@ -102,7 +103,7 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
     double round_trip_fee_rate = fee_rate * 2.0;
 
     if (grid_profit_rate <= round_trip_fee_rate) {
-        ERROR("MultiMesh init failed, [REASON] grid profit rate below fee, [INSTRUMENT] " + instrument +
+        ERROR("MultiMesh init failed: [REASON] grid profit rate below fee, [INSTRUMENT] " + instrument +
               ", [GRID_PROFIT] " + std::to_string(grid_profit_rate * 100) + "%, [ROUND_TRIP_FEE] " +
               std::to_string(round_trip_fee_rate * 100) + "%");
         return;
@@ -114,11 +115,11 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
         mesh.grids[idx].volume = mesh.grid_volume;
     }
 
-    INFO("MultiMesh instrument init success, [INSTRUMENT] " + instrument + ", [RANGE] " +
-         std::to_string(mesh.lower_price) + " ~ " + std::to_string(mesh.upper_price) + ", [GRIDS] " +
-         std::to_string(mesh.grid_count) + ", [ACTIVE_GRID_COUNT] " + std::to_string(mesh.active_grid_count) +
-         ", [STEP] " + std::to_string(mesh.grid_step) + ", [GRID_VOLUME] " + std::to_string(mesh.grid_volume) +
-         ", [NET_PROFIT_RATE] " + std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%");
+    INFO("MultiMesh instrument init success: [INSTRUMENT] " + instrument + ", [RANGE] " +
+         std::to_string(mesh.lower_price) + " ~ " + std::to_string(mesh.upper_price) + ", [ACTIVE_GRID_COUNT] " +
+         std::to_string(mesh.active_grid_count) + ", [STEP] " + std::to_string(mesh.grid_step) + ", [GRID_VOLUME] " +
+         std::to_string(mesh.grid_volume) + ", [NET_PROFIT_RATE] " +
+         std::to_string((grid_profit_rate - round_trip_fee_rate) * 100) + "%");
 
     meshes_[instrument] = std::move(mesh);
 }
@@ -143,7 +144,7 @@ void MultiMeshStrategy::Reconstruct(const std::vector<ExecutionReport>& pending_
         }
     }
 
-    INFO("Reconstruct from pending orders, [ADOPTED] " + std::to_string(adopted) + ", [CANCELLED] " +
+    INFO("Reconstruct from pending orders: [ADOPTED] " + std::to_string(adopted) + ", [CANCELLED] " +
          std::to_string(cancelled));
 }
 
@@ -173,10 +174,28 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
     mesh->last_ask = bbo.ask_price;
 
     if (mesh->center_grid_idx >= 0) {
+        int new_center = mesh->center_grid_idx;
+
+        while (new_center + 1 <= mesh->grid_count && mesh->grids[new_center + 1].state == GridState::EMPTY &&
+               bbo.bid_price >= mesh->grids[new_center + 1].price) {
+            ++new_center;
+        }
+
+        if (new_center == mesh->center_grid_idx) {
+            while (new_center - 1 >= 0 && mesh->grids[new_center - 1].state == GridState::EMPTY &&
+                   bbo.ask_price <= mesh->grids[new_center - 1].price) {
+                --new_center;
+            }
+        }
+
+        if (new_center != mesh->center_grid_idx) {
+            mesh->center_grid_idx = new_center;
+            Rebalance(mesh);
+        }
+
         return;
     }
 
-    // First BBO: determine center and place initial orders
     double mid_price = (bbo.bid_price + bbo.ask_price) / 2.0;
     mesh->center_grid_idx =
         std::clamp((int)std::round((mid_price - mesh->lower_price) / mesh->grid_step), 0, mesh->grid_count);
@@ -204,21 +223,6 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
             if (mesh->grids[idx].state == GridState::SELL_PENDING)
                 ++sell_count;
         }
-    }
-
-    if (mesh->market_type == MarketType::SPOT) {
-        INFO(
-            "Place initial grid orders, [INSTRUMENT] " + mesh->instrument + ", [MID_PRICE] " +
-            std::to_string(mid_price) + ", [CENTER_GRID] " + std::to_string(mesh->center_grid_idx) + ", [BUY_GRIDS] " +
-            std::to_string(buy_count) + ", [SELL_GRIDS] " + std::to_string(sell_count) + ", [QUOTE_USED] " +
-            std::to_string(initial_quote_available -
-                           position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency)) +
-            ", [BASE_USED] " +
-            std::to_string(initial_base_available - position_manager_->GetEffectiveAvailableSpot(mesh->base_currency)));
-    } else {
-        INFO("Place initial grid orders, [INSTRUMENT] " + mesh->instrument + ", [MID_PRICE] " +
-             std::to_string(mid_price) + ", [CENTER_GRID] " + std::to_string(mesh->center_grid_idx) + ", [BUY_GRIDS] " +
-             std::to_string(buy_count) + ", [SELL_GRIDS] " + std::to_string(sell_count));
     }
 }
 
@@ -257,7 +261,7 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
             INFO("Buy filled: [INSTRUMENT] " + mesh->instrument + ", [PRICE] " + std::to_string(grid.price) +
-                 ", [VOLUME] " + std::to_string(grid.volume) + ", [CENTER_GRID] " + std::to_string(grid_index));
+                 ", [VOLUME] " + std::to_string(grid.volume) + ", [CENTER_PRICE] " + std::to_string(grid.price));
             Rebalance(mesh);
         } else if (grid.state == GridState::SELL_PENDING ||
                    (grid.state == GridState::CANCEL_PENDING && report.side == Side::SELL)) {
@@ -265,7 +269,7 @@ void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
             grid.state = GridState::EMPTY;
             grid.order_id.clear();
             INFO("Sell filled: [INSTRUMENT] " + mesh->instrument + ", [PRICE] " + std::to_string(grid.price) +
-                 ", [VOLUME] " + std::to_string(grid.volume) + ", [CENTER_GRID] " + std::to_string(grid_index));
+                 ", [VOLUME] " + std::to_string(grid.volume) + ", [CENTER_PRICE] " + std::to_string(grid.price));
             Rebalance(mesh);
         }
     } else if (report.status == OrderStatus::CANCELLED) {
@@ -354,10 +358,11 @@ void MultiMeshStrategy::OnTimer() {
             }
         }
 
-        INFO("Heartbeat, [INSTRUMENT] " + instrument + ", [BID] " + std::to_string(mesh.last_bid) + ", [ASK] " +
-             std::to_string(mesh.last_ask) + ", [CENTER_GRID] " + std::to_string(mesh.center_grid_idx) +
+        INFO("Heartbeat: [INSTRUMENT] " + instrument + ", [BID] " + std::to_string(mesh.last_bid) + ", [ASK] " +
+             std::to_string(mesh.last_ask) + ", [CENTER_PRICE] " +
+             (mesh.center_grid_idx >= 0 ? std::to_string(mesh.grids[mesh.center_grid_idx].price) : "N/A") +
              ", [BUY_PENDING] " + std::to_string(buy_pending) + ", [SELL_PENDING] " + std::to_string(sell_pending) +
-             ", [CANCEL_PENDING] " + std::to_string(cancel_pending) + ", [EMPTY] " + std::to_string(empty));
+             ", [CANCEL_PENDING] " + std::to_string(cancel_pending));
     }
 }
 
