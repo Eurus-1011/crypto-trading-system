@@ -224,7 +224,7 @@ This system performs automated cryptocurrency trading. Use with extreme caution:
 
 ## License
 
-[Add your license here]
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## References
 
