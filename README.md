@@ -203,13 +203,6 @@ The repository includes a multi-mesh grid strategy as a reference implementation
 - Requires stable network connection (reconnection logic included)
 - No built-in backtesting framework
 
-## Contributing
-
-1. Create feature branch: `git checkout -b feat/your-feature`
-2. Make changes with clear commit messages: `git commit -m "Feat: description"`
-3. Push and create pull request
-4. Ensure all CI checks pass before merge
-
 ## Risk Disclaimer
 
 This system performs automated cryptocurrency trading. Use with extreme caution:
@@ -230,7 +223,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - [OKX API Documentation](https://www.okx.com/docs-v5/en/)
 - [C++23 Standard](https://en.cppreference.com/w/cpp/23)
-- [Grid Trading Strategy Research](https://en.wikipedia.org/wiki/Grid_trading)
 
 ## Authors
 
