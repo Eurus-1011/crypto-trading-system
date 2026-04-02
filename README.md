@@ -1,68 +1,40 @@
 # Crypto Trading System
 
-A high-performance C++23 cryptocurrency trading system with real-time quotation processing, multi-strategy support, and automated execution.
+A high-performance C++23 trading framework for cryptocurrency markets. Built with a modular architecture that separates quotation processing, strategy execution, and order management, enabling developers to build custom trading strategies through a clean abstraction layer.
 
-## Features
+## Core Features
 
+- **Extensible Strategy Framework**: Base `Strategy` class for implementing custom trading algorithms
 - **Real-time Quotation Engine**: WebSocket-based market data ingestion with low-latency processing
-- **Multi-Strategy Framework**: Support for multiple concurrent trading strategies with the grid trading pattern
 - **Automated Trading Engine**: Order placement, position management, and fill reconciliation
-- **Exchange Integration**: Full support for OKX exchange with spot and swap trading
-- **CPU-Pinned Threading**: Three dedicated CPU-affined threads for quotation, strategy, and trading
-- **Mesh Strategy**: Lazy mesh activation with grid-based buy/sell operations
+- **Exchange Integration**: OKX exchange support with spot and swap trading
+- **CPU-Pinned Threading**: Three dedicated threads for quotation, strategy, and trading
 - **Graceful Shutdown**: Signal handling for clean termination and resource cleanup
+- **Example Strategy**: Multi-mesh grid strategy included as reference implementation
 
-## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│           Crypto Trading System                              │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────────┐  ┌──────────────────┐                 │
-│  │ Quotation Engine │  │ Strategy Engine  │                 │
-│  │   (WebSocket)    │  │  (Grid/Mesh)     │                 │
-│  └────────┬─────────┘  └────────┬─────────┘                 │
-│           │                     │                            │
-│           └──────────┬──────────┘                            │
-│                      │                                       │
-│           ┌──────────▼─────────┐                            │
-│           │  Trading Engine    │                            │
-│           │ (Position Manager) │                            │
-│           └──────────┬─────────┘                            │
-│                      │                                       │
-│           ┌──────────▼─────────┐                            │
-│           │ Exchange Client    │                            │
-│           │      (OKX API)     │                            │
-│           └────────────────────┘                            │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-```
 
-## System Modules
+## System Components
 
 ### Quotation Engine
-- Establishes persistent WebSocket connection to exchange
+- Persistent WebSocket connection to exchange
 - Real-time market data streaming and caching
 - Data validation and error recovery
 
 ### Strategy Engine
-- Multi-mesh strategy configuration and state management
+- Strategy lifecycle management and concurrent execution
 - Position tracking with reserved balance accounting
-- Lazy mesh activation based on market conditions
-- Round-trip trade execution and rebalancing
+- Pluggable via `Strategy` base class abstraction
 
 ### Trading Engine
 - Order lifecycle management (pending, filled, rejected)
 - Position state synchronization with exchange
 - Partial fill handling and position reconciliation
-- Cancel pending logic for market oscillations
 
 ### Exchange Client
-- Standardized API abstraction for OKX exchange
+- API abstraction for OKX exchange
 - Authentication and request signing
 - REST and WebSocket support
-- Spot and swap trading interfaces
 
 ## Requirements
 
@@ -111,47 +83,16 @@ The compiled binary will be at: `build/crypto-trading-system`
 
 ## Configuration
 
-### Config File Format
+1. Copy the configuration template:
+   ```bash
+   cp config/config.json.template config/config.json
+   ```
 
-Create `config/config.json` with your trading parameters:
-
-```json
-{
-  "exchange_api": {
-    "api_key": "your_api_key",
-    "secret_key": "your_secret_key",
-    "passphrase": "your_passphrase"
-  },
-  "trading": {
-    "instrument_id": "BTC-USDT",
-    "trading_mode": "cash",
-    "strategies": [
-      {
-        "name": "grid_strategy_1",
-        "type": "mesh",
-        "grid_size": 100,
-        "min_price": 40000,
-        "max_price": 50000,
-        "order_amount": 0.01
-      }
-    ]
-  },
-  "logging": {
-    "level": "INFO",
-    "path": "logs/trading.log"
-  }
-}
-```
-
-### Key Parameters
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `grid_size` | Number of grid levels | 100 |
-| `min_price` | Minimum price level | - |
-| `max_price` | Maximum price level | - |
-| `order_amount` | Base order size per grid | - |
-| `trading_mode` | `cash` or `margin` | `cash` |
+2. Edit `config/config.json` with your trading parameters:
+   - Exchange API credentials (API key, secret, passphrase)
+   - Instrument ID (e.g., `BTC-USDT`)
+   - Strategy configuration
+   - Logging preferences
 
 ## Usage
 
@@ -173,11 +114,7 @@ tail -f logs/trading.log
 kill -SIGTERM <pid>
 ```
 
-The system will:
-1. Stop accepting new orders
-2. Cancel pending orders
-3. Close active connections
-4. Flush logs and exit cleanly
+The system will gracefully stop, cancel pending orders, and close connections.
 
 ## Build & Test
 
@@ -193,11 +130,11 @@ make build
 make clean
 ```
 
-### Status Checks
+### Continuous Integration
 
 The following CI checks run on all PRs and commits:
 
-- **build**: Compilation with `-O3` optimization
+- **build**: Compilation with `-O3` optimization and C++23 standard
 - **check-pr-title**: Validates commit message format
 
 PR title format: `<Type>: <description>`
@@ -205,6 +142,28 @@ PR title format: `<Type>: <description>`
 Valid types: `Feat`, `Fix`, `Chore`, `Refactor`, `Perf`, `Docs`, `Style`, `Test`, `Build`, `CI`
 
 ## Development
+
+### Building Custom Strategies
+
+The framework provides a `Strategy` base class for implementing custom trading logic:
+
+```cpp
+class MyStrategy : public Strategy {
+public:
+    void OnTick(const MarketData& data) override {
+        // Implement your trading logic
+    }
+    
+    void OnFill(const OrderFill& fill) override {
+        // Handle order fills
+    }
+};
+```
+
+Strategies are registered and executed by the `StrategyEngine` with access to:
+- Current market data from `QuotationEngine`
+- Exchange API through `TradingEngine`
+- Position and balance information
 
 ### Code Style
 
@@ -220,37 +179,36 @@ clang-format -i src/**/*.cpp
 .
 ├── src/
 │   ├── main.cpp
-│   ├── quotation_engine/          # Market data processing
-│   ├── strategy_engine/           # Strategy logic and mesh
-│   ├── trading_engine/            # Order and position management
-│   └── clients/                   # Exchange API implementations
-├── config/                        # Configuration templates
-├── scripts/                       # Deployment and utility scripts
-├── CMakeLists.txt                 # Build configuration
-└── .github/workflows/             # CI/CD definitions
+│   ├── quotation_engine/         # Market data processing
+│   ├── strategy_engine/          # Strategy execution framework
+│   ├── trading_engine/           # Order and position management
+│   └── clients/                  # Exchange API implementations
+├── config/                       # Configuration templates
+├── scripts/                      # Deployment and utility scripts
+├── CMakeLists.txt                # Build configuration
+└── .github/workflows/            # CI/CD definitions
 ```
 
-### Adding New Strategies
+## Architecture Notes
 
-1. Extend `Strategy` base class in `strategy_engine/`
-2. Implement required virtual methods
-3. Register in `StrategyRegistry`
-4. Configure in `config.json`
+Architecture diagrams coming soon.
+
+## Example Strategies
+
+The repository includes a multi-mesh grid strategy as a reference implementation. See `strategy_engine/multi_mesh/` for details.
 
 ## Known Limitations
 
 - Currently supports OKX exchange only
-- Grid strategies designed for high-frequency, low-volatility trading
 - Requires stable network connection (reconnection logic included)
 - No built-in backtesting framework
 
 ## Contributing
 
 1. Create feature branch: `git checkout -b feat/your-feature`
-2. Make changes and commit: `git commit -m "Feat: description"`
+2. Make changes with clear commit messages: `git commit -m "Feat: description"`
 3. Push and create pull request
-4. Ensure all CI checks pass
-5. Await review and merge
+4. Ensure all CI checks pass before merge
 
 ## Risk Disclaimer
 
