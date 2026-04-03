@@ -200,30 +200,9 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
     mesh->center_grid_idx =
         std::clamp((int)std::round((mid_price - mesh->lower_price) / mesh->grid_step), 0, mesh->grid_count);
 
-    int lo = std::max(0, mesh->center_grid_idx - mesh->active_grid_count);
-    int hi = std::min(mesh->grid_count, mesh->center_grid_idx + mesh->active_grid_count);
-
-    int buy_count = 0, sell_count = 0;
-    double initial_quote_available = 0.0, initial_base_available = 0.0;
-    if (mesh->market_type == MarketType::SPOT) {
-        initial_quote_available = position_manager_->GetEffectiveAvailableSpot(mesh->quote_currency);
-        initial_base_available = position_manager_->GetEffectiveAvailableSpot(mesh->base_currency);
-    }
-
-    for (int idx = lo; idx < mesh->center_grid_idx; ++idx) {
-        if (mesh->grids[idx].state == GridState::EMPTY) {
-            PlaceBuyAtGrid(mesh, idx);
-            if (mesh->grids[idx].state == GridState::BUY_PENDING)
-                ++buy_count;
-        }
-    }
-    for (int idx = mesh->center_grid_idx + 1; idx <= hi; ++idx) {
-        if (mesh->grids[idx].state == GridState::EMPTY) {
-            PlaceSellAtGrid(mesh, idx);
-            if (mesh->grids[idx].state == GridState::SELL_PENDING)
-                ++sell_count;
-        }
-    }
+    INFO("First BBO: [INSTRUMENT] " + mesh->instrument + ", [MID_PRICE] " + std::to_string(mid_price) +
+         ", [CENTER_PRICE] " + std::to_string(mesh->grids[mesh->center_grid_idx].price));
+    Rebalance(mesh);
 }
 
 void MultiMeshStrategy::OnExecutionReport(const ExecutionReport& report) {
