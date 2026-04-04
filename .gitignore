@@ -1,7 +1,6 @@
 build/
 cmake-build-*/
 *.o
-*.a
 *.so
 *.dylib
 compile_commands.json

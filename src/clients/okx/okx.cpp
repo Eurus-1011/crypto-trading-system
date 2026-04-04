@@ -119,8 +119,9 @@ std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, co
 
 bool OkxClient::ParseLoginResponse(const std::string& response) {
     simdjson::ondemand::parser parser;
+    simdjson::padded_string padded(response);
     simdjson::ondemand::document doc;
-    if (parser.iterate(response).get(doc)) {
+    if (parser.iterate(padded).get(doc)) {
         return false;
     }
     std::string_view event_value, code_value;
@@ -456,8 +457,9 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
 }
 
 void OkxClient::OnPublicMessage(const std::string& raw) {
+    simdjson::padded_string padded(raw);
     simdjson::ondemand::document doc;
-    if (public_parser_.iterate(raw).get(doc)) {
+    if (public_parser_.iterate(padded).get(doc)) {
         return;
     }
 
@@ -503,8 +505,9 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
         return;
     }
 
+    simdjson::padded_string padded(raw);
     simdjson::ondemand::document doc;
-    if (private_parser_.iterate(raw).get(doc)) {
+    if (private_parser_.iterate(padded).get(doc)) {
         return;
     }
 
