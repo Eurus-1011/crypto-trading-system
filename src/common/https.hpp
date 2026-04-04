@@ -95,9 +95,41 @@ inline std::string HttpsRequest(const std::string& host, const std::string& port
     SSL_CTX_free(ctx);
     close(fd);
 
-    auto body_start = response.find("\r\n\r\n");
-    if (body_start == std::string::npos) {
+    auto header_end = response.find("\r\n\r\n");
+    if (header_end == std::string::npos) {
         return "";
     }
-    return response.substr(body_start + 4);
+
+    std::string headers_str = response.substr(0, header_end);
+    std::string resp_body = response.substr(header_end + 4);
+
+    bool chunked = false;
+    for (size_t pos = 0; (pos = headers_str.find("\r\n", pos)) != std::string::npos; pos += 2) {
+        auto line_start = pos + 2;
+        auto line_end = headers_str.find("\r\n", line_start);
+        if (line_end == std::string::npos) line_end = headers_str.size();
+        std::string line = headers_str.substr(line_start, line_end - line_start);
+        if (line.find("Transfer-Encoding") != std::string::npos && line.find("chunked") != std::string::npos) {
+            chunked = true;
+            break;
+        }
+    }
+
+    if (chunked) {
+        std::string decoded;
+        size_t pos = 0;
+        while (pos < resp_body.size()) {
+            auto crlf = resp_body.find("\r\n", pos);
+            if (crlf == std::string::npos) break;
+            size_t chunk_size = std::strtoul(resp_body.data() + pos, nullptr, 16);
+            if (chunk_size == 0) break;
+            pos = crlf + 2;
+            if (pos + chunk_size > resp_body.size()) break;
+            decoded.append(resp_body, pos, chunk_size);
+            pos += chunk_size + 2;
+        }
+        return decoded;
+    }
+
+    return resp_body;
 }
