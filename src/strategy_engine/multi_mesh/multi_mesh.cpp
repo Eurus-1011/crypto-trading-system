@@ -282,6 +282,12 @@ void MultiMeshStrategy::Rebalance(MeshConfig* mesh) {
 
     for (int idx = 0; idx <= mesh->grid_count; ++idx) {
         if (idx == mesh->center_grid_idx) {
+            auto& center_grid = mesh->grids[idx];
+            if ((center_grid.state == GridState::BUY_PENDING || center_grid.state == GridState::SELL_PENDING) &&
+                !center_grid.order_id.empty()) {
+                EmitCancel(mesh->instrument.c_str(), center_grid.order_id.c_str(), mesh->market_type);
+                center_grid.state = GridState::CANCEL_PENDING;
+            }
             continue;
         }
         auto& grid = mesh->grids[idx];
