@@ -19,6 +19,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 find_package(OpenSSL REQUIRED)
 
+add_subdirectory(third_party/quill EXCLUDE_FROM_ALL)
+
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
 add_library(exchange_client STATIC
@@ -33,6 +35,7 @@ target_link_libraries(exchange_client PUBLIC
     ${JSONCPP_LIBRARIES}
     OpenSSL::Crypto
     OpenSSL::SSL
+    quill::quill
     pthread
 )
 

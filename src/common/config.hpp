@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+struct LoggerConfig {
+    int cpu_affinity;
+};
+
 struct ExchangeConfig {
     std::string name;
     std::string api_key;
@@ -29,6 +33,7 @@ struct TradingEngineConfig {
 };
 
 struct SystemConfig {
+    LoggerConfig logger;
     ExchangeConfig exchange;
     QuotationEngineConfig quotation_engine;
     StrategyEngineConfig strategy_engine;
@@ -63,6 +68,10 @@ inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& 
     if (!Json::parseFromStream(builder, file, &root, &parse_err)) {
         err = "invalid JSON: " + parse_err;
         return false;
+    }
+
+    if (root.isMember("logger") && root["logger"].isMember("cpu_affinity")) {
+        out.logger.cpu_affinity = root["logger"]["cpu_affinity"].asInt();
     }
 
     auto& exchange = root["exchange"];
