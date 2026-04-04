@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <openssl/hmac.h>
-#include <sstream>
 #include <thread>
 
 bool ExchangeClient::DetectHttpProxy(std::string& proxy_host, std::string& proxy_port) {
@@ -45,15 +44,6 @@ std::string ExchangeClient::HmacSha256Sign(const std::string& key, const std::st
     HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()), reinterpret_cast<const unsigned char*>(message.data()),
          message.size(), digest, &digest_len);
     return WsClient::Base64Encode(digest, digest_len);
-}
-
-Json::Value ExchangeClient::ParseJson(const std::string& raw) {
-    Json::CharReaderBuilder builder;
-    Json::Value val;
-    std::string errs;
-    std::istringstream ss(raw);
-    Json::parseFromStream(builder, ss, &val, &errs);
-    return val;
 }
 
 void ExchangeClient::Subscribe(const std::string& channel, const std::string& instrument) {
@@ -152,8 +142,7 @@ void ExchangeClient::LoginPrivate() {
         throw std::runtime_error("private ws login read failed");
     }
 
-    Json::Value root = ParseJson(response);
-    if (root.get("event", "").asString() != "login" || root.get("code", "-1").asString() != "0") {
+    if (!ParseLoginResponse(response)) {
         throw std::runtime_error("private ws login failed: " + response);
     }
 }
@@ -204,8 +193,7 @@ bool ExchangeClient::ReconnectPrivate() {
         return false;
     }
 
-    Json::Value root = ParseJson(response);
-    if (root.get("event", "").asString() != "login" || root.get("code", "-1").asString() != "0") {
+    if (!ParseLoginResponse(response)) {
         private_ws_.Close();
         return false;
     }

@@ -25,7 +25,7 @@ void StrategyEngine::Run() {
 
     strategy->Bind(signal_ring_);
     strategy->SetPositionManager(position_manager_);
-    strategy->Init(config_.strategy_engine.params);
+    strategy->Init(config_.strategy_engine.params_json);
 
     if (!pending_orders_.empty()) {
         strategy->Reconstruct(pending_orders_);

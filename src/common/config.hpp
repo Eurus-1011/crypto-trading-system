@@ -1,7 +1,6 @@
 #pragma once
 
-#include <fstream>
-#include <json/json.h>
+#include <simdjson.h>
 #include <string>
 #include <vector>
 
@@ -24,7 +23,7 @@ struct QuotationEngineConfig {
 
 struct StrategyEngineConfig {
     std::string name;
-    Json::Value params;
+    std::string params_json;
     std::vector<int> cpu_affinity;
 };
 
@@ -40,68 +39,95 @@ struct SystemConfig {
     TradingEngineConfig trading_engine;
 };
 
-inline void ParseCpuAffinity(const Json::Value& node, std::vector<int>& out) {
+inline void ParseCpuAffinity(simdjson::dom::element node, std::vector<int>& out) {
     out.clear();
-    if (!node.isMember("cpu_affinity")) {
+    auto affinity_result = node["cpu_affinity"];
+    if (affinity_result.error()) {
         return;
     }
-    auto& affinity = node["cpu_affinity"];
-    if (affinity.isInt()) {
-        out.push_back(affinity.asInt());
-    } else if (affinity.isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < affinity.size(); ++idx) {
-            out.push_back(affinity[idx].asInt());
+    auto affinity = affinity_result.value();
+    if (auto as_int = affinity.get_int64(); !as_int.error()) {
+        out.push_back(static_cast<int>(as_int.value()));
+    } else if (auto as_array = affinity.get_array(); !as_array.error()) {
+        for (auto item : as_array.value()) {
+            if (auto val = item.get_int64(); !val.error()) {
+                out.push_back(static_cast<int>(val.value()));
+            }
+        }
+    }
+}
+
+inline void ParseStringArray(simdjson::dom::element node, const char* key, std::vector<std::string>& out) {
+    out.clear();
+    auto array_result = node[key];
+    if (array_result.error()) {
+        return;
+    }
+    auto as_array = array_result.get_array();
+    if (as_array.error()) {
+        return;
+    }
+    for (auto item : as_array.value()) {
+        if (auto as_string = item.get_string(); !as_string.error()) {
+            out.emplace_back(as_string.value());
         }
     }
 }
 
 inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& err) {
     err.clear();
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        err = "cannot open config: " + path;
+    simdjson::dom::parser parser;
+    auto doc_result = parser.load(path);
+    if (doc_result.error()) {
+        err = "invalid JSON config: " + std::string(simdjson::error_message(doc_result.error()));
         return false;
     }
-    Json::CharReaderBuilder builder;
-    Json::Value root;
-    std::string parse_err;
-    if (!Json::parseFromStream(builder, file, &root, &parse_err)) {
-        err = "invalid JSON: " + parse_err;
+    auto root = doc_result.value();
+
+    auto logger_result = root["logger"];
+    if (!logger_result.error()) {
+        auto logger = logger_result.value();
+        int64_t cpu_val;
+        if (!logger["cpu_affinity"].get(cpu_val)) {
+            out.logger.cpu_affinity = static_cast<int>(cpu_val);
+        }
+    }
+
+    auto exchange_result = root["exchange"];
+    if (exchange_result.error()) {
+        err = "missing 'exchange' section";
         return false;
     }
+    auto exchange = exchange_result.value();
+    std::string_view string_val;
+    out.exchange.name = exchange["name"].get(string_val) ? "okx" : std::string(string_val);
+    out.exchange.api_key = exchange["api_key"].get(string_val) ? "" : std::string(string_val);
+    out.exchange.secret_key = exchange["secret_key"].get(string_val) ? "" : std::string(string_val);
+    out.exchange.passphrase = exchange["passphrase"].get(string_val) ? "" : std::string(string_val);
 
-    if (root.isMember("logger") && root["logger"].isMember("cpu_affinity")) {
-        out.logger.cpu_affinity = root["logger"]["cpu_affinity"].asInt();
+    auto qe_result = root["quotation_engine"];
+    if (!qe_result.error()) {
+        auto qe = qe_result.value();
+        ParseStringArray(qe, "instruments", out.quotation_engine.instruments);
+        ParseStringArray(qe, "channels", out.quotation_engine.channels);
+        ParseCpuAffinity(qe, out.quotation_engine.cpu_affinity);
     }
 
-    auto& exchange = root["exchange"];
-    out.exchange.name = exchange.get("name", "okx").asString();
-    out.exchange.api_key = exchange.get("api_key", "").asString();
-    out.exchange.secret_key = exchange.get("secret_key", "").asString();
-    out.exchange.passphrase = exchange.get("passphrase", "").asString();
-
-    auto& qe = root["quotation_engine"];
-    out.quotation_engine.instruments.clear();
-    if (qe.isMember("instruments") && qe["instruments"].isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < qe["instruments"].size(); ++idx) {
-            out.quotation_engine.instruments.push_back(qe["instruments"][idx].asString());
+    auto se_result = root["strategy_engine"];
+    if (!se_result.error()) {
+        auto se = se_result.value();
+        out.strategy_engine.name = se["name"].get(string_val) ? "mesh" : std::string(string_val);
+        auto params_element = se["params"];
+        if (!params_element.error()) {
+            out.strategy_engine.params_json = simdjson::minify(params_element.value());
         }
+        ParseCpuAffinity(se, out.strategy_engine.cpu_affinity);
     }
-    out.quotation_engine.channels.clear();
-    if (qe.isMember("channels") && qe["channels"].isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < qe["channels"].size(); ++idx) {
-            out.quotation_engine.channels.push_back(qe["channels"][idx].asString());
-        }
+
+    auto te_result = root["trading_engine"];
+    if (!te_result.error()) {
+        ParseCpuAffinity(te_result.value(), out.trading_engine.cpu_affinity);
     }
-    ParseCpuAffinity(qe, out.quotation_engine.cpu_affinity);
-
-    auto& se = root["strategy_engine"];
-    out.strategy_engine.name = se.get("name", "mesh").asString();
-    out.strategy_engine.params = se.get("params", Json::Value());
-    ParseCpuAffinity(se, out.strategy_engine.cpu_affinity);
-
-    auto& te = root["trading_engine"];
-    ParseCpuAffinity(te, out.trading_engine.cpu_affinity);
 
     if (out.exchange.api_key.empty() || out.exchange.secret_key.empty()) {
         err = "exchange.api_key and exchange.secret_key are required";

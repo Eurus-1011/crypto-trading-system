@@ -14,33 +14,11 @@ std::string OkxClient::GetPrivateWsPort() { return OkxWsPort; }
 std::string OkxClient::GetPrivateWsPath() { return OkxPrivateWsPath; }
 
 std::string OkxClient::BuildSubscribeMessage(const std::string& channel, const std::string& instrument) {
-    Json::Value msg;
-    msg["op"] = "subscribe";
-
-    Json::Value arg;
-    arg["channel"] = channel;
-    arg["instId"] = instrument;
-    msg["args"].append(arg);
-
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-
-    return Json::writeString(writer, msg);
+    return R"({"op":"subscribe","args":[{"channel":")" + channel + R"(","instId":")" + instrument + R"("}]})";
 }
 
 std::string OkxClient::BuildPrivateSubscribeMessage(const std::string& channel, const std::string& inst_type) {
-    Json::Value msg;
-    msg["op"] = "subscribe";
-
-    Json::Value arg;
-    arg["channel"] = channel;
-    arg["instType"] = inst_type;
-    msg["args"].append(arg);
-
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-
-    return Json::writeString(writer, msg);
+    return R"({"op":"subscribe","args":[{"channel":")" + channel + R"(","instType":")" + inst_type + R"("}]})";
 }
 
 std::string OkxClient::IsoTimestamp() const {
@@ -69,73 +47,97 @@ std::string OkxClient::BuildLoginMessage() {
     std::string timestamp = IsoTimestamp();
     std::string signature = Sign(timestamp, "GET", "/users/self/verify");
 
-    Json::Value msg;
-    msg["op"] = "login";
-
-    Json::Value arg;
-    arg["apiKey"] = config_.api_key;
-    arg["passphrase"] = config_.passphrase;
-    arg["timestamp"] = timestamp;
-    arg["sign"] = signature;
-    msg["args"].append(arg);
-
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-
-    return Json::writeString(writer, msg);
+    std::string msg;
+    msg.reserve(256);
+    msg += R"({"op":"login","args":[{"apiKey":")";
+    msg += config_.api_key;
+    msg += R"(","passphrase":")";
+    msg += config_.passphrase;
+    msg += R"(","timestamp":")";
+    msg += timestamp;
+    msg += R"(","sign":")";
+    msg += signature;
+    msg += R"("}]})";
+    return msg;
 }
 
 std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
     std::string id = std::to_string(NowNs());
     pending_ws_ops_[id] = req;
 
-    Json::Value msg;
-    msg["id"] = id;
-    msg["op"] = "order";
+    int inst_id_code = inst_id_codes_.count(req.instrument) ? inst_id_codes_.at(req.instrument) : 0;
 
-    Json::Value arg;
-    arg["instIdCode"] = inst_id_codes_.count(req.instrument) ? inst_id_codes_.at(req.instrument) : 0;
-    arg["side"] = kOkxSide.at(req.side);
-    arg["ordType"] = kOkxOrderType.at(req.order_type);
-    arg["sz"] = req.size;
-    arg["tdMode"] = kOkxTdMode.at(req.market_type);
+    std::string msg;
+    msg.reserve(512);
+    msg += R"({"id":")";
+    msg += id;
+    msg += R"(","op":"order","args":[{"instIdCode":)";
+    msg += std::to_string(inst_id_code);
+    msg += R"(,"side":")";
+    msg += kOkxSide.at(req.side);
+    msg += R"(","ordType":")";
+    msg += kOkxOrderType.at(req.order_type);
+    msg += R"(","sz":")";
+    msg += req.size;
+    msg += R"(","tdMode":")";
+    msg += kOkxTdMode.at(req.market_type);
+    msg += '"';
 
     if (req.market_type == MarketType::SWAP) {
-        arg["posSide"] = kOkxPosSide.at(req.position_side);
+        msg += R"(,"posSide":")";
+        msg += kOkxPosSide.at(req.position_side);
+        msg += '"';
     } else if (req.order_type == OrderType::MARKET && req.side == Side::BUY) {
-        arg["tgtCcy"] = req.target_currency.empty() ? "quote_ccy" : req.target_currency;
+        msg += R"(,"tgtCcy":")";
+        msg += req.target_currency.empty() ? "quote_ccy" : req.target_currency;
+        msg += '"';
     }
 
     if (req.order_type == OrderType::LIMIT && !req.price.empty()) {
-        arg["px"] = req.price;
+        msg += R"(,"px":")";
+        msg += req.price;
+        msg += '"';
     }
-    msg["args"].append(arg);
-
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-    return Json::writeString(writer, msg);
+    msg += R"(}]})";
+    return msg;
 }
 
 std::string OkxClient::BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) {
-    Json::Value msg;
-    msg["id"] = std::to_string(NowNs());
-    msg["op"] = "cancel-order";
+    int inst_id_code = inst_id_codes_.count(instrument) ? inst_id_codes_.at(instrument) : 0;
 
-    Json::Value arg;
-    arg["instIdCode"] = inst_id_codes_.count(instrument) ? inst_id_codes_.at(instrument) : 0;
-    arg["ordId"] = order_id;
-    msg["args"].append(arg);
+    std::string msg;
+    msg.reserve(256);
+    msg += R"({"id":")";
+    msg += std::to_string(NowNs());
+    msg += R"(","op":"cancel-order","args":[{"instIdCode":)";
+    msg += std::to_string(inst_id_code);
+    msg += R"(,"ordId":")";
+    msg += order_id;
+    msg += R"("}]})";
+    return msg;
+}
 
-    Json::StreamWriterBuilder writer;
-    writer["indentation"] = "";
-
-    return Json::writeString(writer, msg);
+bool OkxClient::ParseLoginResponse(const std::string& response) {
+    simdjson::ondemand::parser parser;
+    simdjson::ondemand::document doc;
+    if (parser.iterate(response).get(doc)) {
+        return false;
+    }
+    std::string_view event_value, code_value;
+    if (doc["event"].get(event_value) || event_value != "login") {
+        return false;
+    }
+    if (doc["code"].get(code_value) || code_value != "0") {
+        return false;
+    }
+    return true;
 }
 
 void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments) {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
+    simdjson::ondemand::parser parser;
     for (const auto& instrument : instruments) {
         const char* inst_type = kOkxInstType.at(DetectMarketType(instrument.c_str()));
         std::string path = std::string("/api/v5/public/instruments?instType=") + inst_type + "&instId=" + instrument;
@@ -149,15 +151,35 @@ void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments
             WARN("FetchInstrumentCodes invalid response: [INSTRUMENT] " + instrument);
             continue;
         }
-        Json::Value root = ParseJson(raw_body.substr(json_start));
-        if (root.get("code", "-1").asString() != "0" || !root["data"].isArray() || root["data"].empty()) {
-            WARN("FetchInstrumentCodes error: [INSTRUMENT] " + instrument + ", [MSG] " +
-                 root.get("msg", "").asString());
+
+        simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+        simdjson::ondemand::document doc;
+        if (parser.iterate(padded_body).get(doc)) {
+            WARN("FetchInstrumentCodes parse failed: [INSTRUMENT] " + instrument);
             continue;
         }
-        int code = root["data"][0].get("instIdCode", 0).asInt();
-        inst_id_codes_[instrument] = code;
-        INFO("Fetch instIdCode: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code));
+
+        std::string_view code_str;
+        if (doc["code"].get(code_str) || code_str != "0") {
+            std::string_view msg_str;
+            (void)doc["msg"].get(msg_str);
+            WARN("FetchInstrumentCodes error: [INSTRUMENT] " + instrument + ", [MSG] " + std::string(msg_str));
+            continue;
+        }
+
+        simdjson::ondemand::array data_array;
+        if (doc["data"].get_array().get(data_array)) {
+            WARN("FetchInstrumentCodes empty data: [INSTRUMENT] " + instrument);
+            continue;
+        }
+
+        for (auto element : data_array) {
+            int64_t code_val = 0;
+            (void)element["instIdCode"].get_int64().get(code_val);
+            inst_id_codes_[instrument] = static_cast<int>(code_val);
+            INFO("Fetch instIdCode: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code_val));
+            break;
+        }
     }
 }
 
@@ -166,6 +188,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
+    simdjson::ondemand::parser parser;
     std::string after_cursor;
     while (true) {
         std::string path = "/api/v5/trade/orders-pending?instType=" + inst_type;
@@ -198,38 +221,67 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             break;
         }
 
-        Json::Value root = ParseJson(raw_body.substr(json_start));
-        if (root.get("code", "-1").asString() != "0") {
-            WARN("Query pending orders error: [INST_TYPE] " + inst_type + ", [MSG] " + root.get("msg", "").asString());
+        simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+        simdjson::ondemand::document doc;
+        if (parser.iterate(padded_body).get(doc)) {
+            WARN("Query pending orders parse failed: [INST_TYPE] " + inst_type);
             break;
         }
 
-        auto& data = root["data"];
-        if (!data.isArray() || data.empty()) {
+        std::string_view code_str;
+        if (doc["code"].get(code_str) || code_str != "0") {
+            std::string_view msg_str;
+            (void)doc["msg"].get(msg_str);
+            WARN("Query pending orders error: [INST_TYPE] " + inst_type + ", [MSG] " + std::string(msg_str));
+            break;
+        }
+
+        simdjson::ondemand::array data_array;
+        if (doc["data"].get_array().get(data_array)) {
             break;
         }
 
         MarketType market_type = OkxParseInstType(inst_type);
-        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
+        size_t data_count = 0;
+        std::string last_order_id;
+
+        for (auto order_result : data_array) {
+            simdjson::ondemand::value order_element;
+            if (order_result.get(order_element)) {
+                break;
+            }
+
+            std::string_view inst_id, order_id, state, side, pos_side;
+            (void)order_element["instId"].get(inst_id);
+            (void)order_element["ordId"].get(order_id);
+            (void)order_element["state"].get(state);
+            (void)order_element["side"].get(side);
+            (void)order_element["posSide"].get(pos_side);
+
+            std::string order_id_str(order_id);
+
             ExecutionReport report{};
             report.timestamp_ns = NowNs();
-            report.SetInstrument(data[idx].get("instId", "").asCString());
-            report.SetOrderId(data[idx].get("ordId", "").asCString());
-            report.status = OkxParseOrderState(data[idx].get("state", "").asCString());
-            report.side = OkxParseSide(data[idx].get("side", "buy").asCString());
+            report.SetInstrument(std::string(inst_id).c_str());
+            report.SetOrderId(order_id_str.c_str());
+            report.status = OkxParseOrderState(state);
+            report.side = OkxParseSide(side.empty() ? "buy" : side);
             report.market_type = market_type;
-            report.position_side = OkxParsePosSide(data[idx].get("posSide", "net").asCString());
-            report.price = ParseDouble(data[idx]["px"]);
-            report.filled_volume = ParseDouble(data[idx]["accFillSz"]);
-            report.total_volume = ParseDouble(data[idx]["sz"]);
-            report.avg_fill_price = ParseDouble(data[idx]["avgPx"]);
+            report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+            (void)order_element["px"].get_double_in_string().get(report.price);
+            (void)order_element["accFillSz"].get_double_in_string().get(report.filled_volume);
+            (void)order_element["sz"].get_double_in_string().get(report.total_volume);
+            (void)order_element["avgPx"].get_double_in_string().get(report.avg_fill_price);
             result.push_back(report);
+
+            last_order_id = std::move(order_id_str);
+            ++data_count;
         }
 
-        if (data.size() < 100) {
+        if (data_count < 100) {
             break;
         }
-        after_cursor = data[data.size() - 1].get("ordId", "").asString();
+        after_cursor = last_order_id;
     }
     return result;
 }
@@ -275,21 +327,51 @@ std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
         return result;
     }
 
-    Json::Value root = ParseJson(raw_body.substr(json_start));
-    if (root.get("code", "-1").asString() != "0" || !root["data"].isArray() || root["data"].empty()) {
+    simdjson::ondemand::parser parser;
+    simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+    simdjson::ondemand::document doc;
+    if (parser.iterate(padded_body).get(doc)) {
         return result;
     }
 
-    auto& details = root["data"][0]["details"];
-    if (details.isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < details.size(); ++idx) {
-            std::string currency = details[idx].get("ccy", "").asString();
-            double available = ParseDouble(details[idx]["availBal"]);
-            double frozen = ParseDouble(details[idx]["frozenBal"]);
+    std::string_view code_str;
+    if (doc["code"].get(code_str) || code_str != "0") {
+        return result;
+    }
+
+    simdjson::ondemand::array data_array;
+    if (doc["data"].get_array().get(data_array)) {
+        return result;
+    }
+
+    for (auto first_result : data_array) {
+        simdjson::ondemand::value first_element;
+        if (first_result.get(first_element)) {
+            break;
+        }
+
+        simdjson::ondemand::array details_array;
+        if (first_element["details"].get_array().get(details_array)) {
+            break;
+        }
+
+        for (auto detail_result : details_array) {
+            simdjson::ondemand::value detail;
+            if (detail_result.get(detail)) {
+                continue;
+            }
+            std::string_view currency;
+            if (detail["ccy"].get(currency) || currency.empty()) {
+                continue;
+            }
+            double available = 0.0, frozen = 0.0;
+            (void)detail["availBal"].get_double_in_string().get(available);
+            (void)detail["frozenBal"].get_double_in_string().get(frozen);
             if (available > 0 || frozen > 0) {
-                result[currency] = {available, frozen};
+                result[std::string(currency)] = {available, frozen};
             }
         }
+        break;
     }
     return result;
 }
@@ -323,18 +405,39 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
         return result;
     }
 
-    Json::Value root = ParseJson(raw_body.substr(json_start));
-    if (root.get("code", "-1").asString() != "0" || !root["data"].isArray()) {
+    simdjson::ondemand::parser parser;
+    simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+    simdjson::ondemand::document doc;
+    if (parser.iterate(padded_body).get(doc)) {
         return result;
     }
 
-    auto& data = root["data"];
-    for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
-        std::string instrument = data[idx].get("instId", "").asString();
-        PosSide position_side = OkxParsePosSide(data[idx].get("posSide", "net").asCString());
-        double contracts = ParseDouble(data[idx]["pos"]);
-        double average_opening_price = ParseDouble(data[idx]["avgPx"]);
-        double unrealized_profit_loss = ParseDouble(data[idx]["upl"]);
+    std::string_view code_str;
+    if (doc["code"].get(code_str) || code_str != "0") {
+        return result;
+    }
+
+    simdjson::ondemand::array data_array;
+    if (doc["data"].get_array().get(data_array)) {
+        return result;
+    }
+
+    for (auto position_result : data_array) {
+        simdjson::ondemand::value position_element;
+        if (position_result.get(position_element)) {
+            break;
+        }
+
+        std::string_view inst_id, pos_side_str;
+        (void)position_element["instId"].get(inst_id);
+        (void)position_element["posSide"].get(pos_side_str);
+
+        std::string instrument(inst_id);
+        PosSide position_side = OkxParsePosSide(pos_side_str.empty() ? "net" : pos_side_str);
+        double contracts = 0.0, average_opening_price = 0.0, unrealized_profit_loss = 0.0;
+        (void)position_element["pos"].get_double_in_string().get(contracts);
+        (void)position_element["avgPx"].get_double_in_string().get(average_opening_price);
+        (void)position_element["upl"].get_double_in_string().get(unrealized_profit_loss);
 
         if (contracts > 0.0) {
             SwapPosition swap_position;
@@ -353,47 +456,81 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
 }
 
 void OkxClient::OnPublicMessage(const std::string& raw) {
-    Json::Value root = ParseJson(raw);
-    if (!root.isMember("arg") || !root.isMember("data")) {
+    simdjson::ondemand::document doc;
+    if (public_parser_.iterate(raw).get(doc)) {
         return;
     }
 
-    std::string channel = root["arg"].get("channel", "").asString();
-    std::string inst_id = root["arg"].get("instId", "").asString();
-    auto& data = root["data"];
+    simdjson::ondemand::object arg_obj;
+    if (doc["arg"].get_object().get(arg_obj)) {
+        return;
+    }
 
-    if (!data.isArray() || data.empty()) {
+    std::string_view channel, inst_id;
+    (void)arg_obj["channel"].get(channel);
+    (void)arg_obj["instId"].get(inst_id);
+    std::string inst_id_str(inst_id);
+
+    simdjson::ondemand::array data_array;
+    if (doc["data"].get_array().get(data_array)) {
         return;
     }
 
     if (channel == OkxChannelTickers) {
-        DecodeTicker(data[0], inst_id);
+        for (auto element : data_array) {
+            DecodeTicker(element.value(), inst_id_str);
+            break;
+        }
     } else if (channel == OkxChannelBBO) {
-        DecodeBBO(data[0], inst_id);
+        for (auto element : data_array) {
+            DecodeBBO(element.value(), inst_id_str);
+            break;
+        }
     } else if (channel == OkxChannelBooks5) {
-        DecodeDepth(data[0], inst_id);
+        for (auto element : data_array) {
+            DecodeDepth(element.value(), inst_id_str);
+            break;
+        }
     } else if (channel == OkxChannelTrades) {
-        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
-            DecodeTrade(data[idx], inst_id);
+        for (auto element : data_array) {
+            DecodeTrade(element.value(), inst_id_str);
         }
     }
 }
 
 void OkxClient::OnPrivateMessage(const std::string& raw) {
-    Json::Value root = ParseJson(raw);
-
-    if (root.isMember("event")) {
+    if (raw.find("\"event\"") != std::string::npos) {
         return;
     }
 
-    if (root.isMember("op")) {
-        std::string code = root.get("code", "").asString();
-        std::string op = root.get("op", "").asString();
-        std::string id = root.get("id", "").asString();
+    simdjson::ondemand::document doc;
+    if (private_parser_.iterate(raw).get(doc)) {
+        return;
+    }
+
+    if (raw.find("\"op\"") != std::string::npos) {
+        std::string_view op_value, code_str, id_str;
+        (void)doc["op"].get(op_value);
+        (void)doc["code"].get(code_str);
+        (void)doc["id"].get(id_str);
+        std::string op(op_value);
+        std::string code(code_str);
+        std::string id(id_str);
+
         if (code != "0") {
-            std::string msg = root.get("msg", "").asString();
-            if (root["data"].isArray() && !root["data"].empty()) {
-                msg = root["data"][0].get("sMsg", msg).asString();
+            std::string_view msg_str;
+            (void)doc["msg"].get(msg_str);
+            std::string msg(msg_str);
+
+            simdjson::ondemand::array data_array;
+            if (!doc["data"].get_array().get(data_array)) {
+                for (auto elem : data_array) {
+                    std::string_view sub_msg;
+                    if (!elem["sMsg"].get(sub_msg)) {
+                        msg = std::string(sub_msg);
+                    }
+                    break;
+                }
             }
             ERROR("Private ws op failed: [OP] " + op + ", [CODE] " + code + ", [MSG] " + msg);
 
@@ -424,160 +561,258 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
         return;
     }
 
-    if (!root.isMember("arg") || !root.isMember("data")) {
+    simdjson::ondemand::object arg_obj;
+    if (doc["arg"].get_object().get(arg_obj)) {
         return;
     }
 
-    std::string channel = root["arg"].get("channel", "").asString();
-    auto& data = root["data"];
+    std::string_view channel;
+    (void)arg_obj["channel"].get(channel);
 
-    if (!data.isArray() || data.empty()) {
+    simdjson::ondemand::array data_array;
+    if (doc["data"].get_array().get(data_array)) {
         return;
     }
 
     if (channel == OkxChannelOrders) {
-        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
-            DecodeOrderUpdate(data[idx]);
+        for (auto element : data_array) {
+            DecodeOrderUpdate(element.value());
         }
     } else if (channel == OkxChannelAccount) {
-        for (Json::ArrayIndex idx = 0; idx < data.size(); ++idx) {
-            DecodeAccountUpdate(data[idx]);
+        for (auto element : data_array) {
+            DecodeAccountUpdate(element.value());
         }
     }
 }
 
-void OkxClient::DecodeOrderUpdate(const Json::Value& data) {
+void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     if (!on_order_update_) {
         return;
     }
 
-    std::string inst_id = data.get("instId", "").asString();
+    std::string_view inst_id, order_id, state, side, pos_side, fee_currency;
+    (void)data["instId"].get(inst_id);
+    (void)data["ordId"].get(order_id);
+    (void)data["state"].get(state);
+    (void)data["side"].get(side);
+    (void)data["posSide"].get(pos_side);
+    (void)data["feeCcy"].get(fee_currency);
+
+    std::string inst_id_str(inst_id);
 
     ExecutionReport report{};
     report.timestamp_ns = NowNs();
-    report.SetInstrument(inst_id.c_str());
-    report.SetOrderId(data.get("ordId", "").asCString());
-    report.status = OkxParseOrderState(data.get("state", "").asCString());
-    report.side = OkxParseSide(data.get("side", "buy").asCString());
-    report.market_type = DetectMarketType(inst_id.c_str());
-    report.position_side = OkxParsePosSide(data.get("posSide", "net").asCString());
-    report.price = ParseDouble(data["px"]);
-    report.filled_volume = ParseDouble(data["accFillSz"]);
-    report.total_volume = ParseDouble(data["sz"]);
-    report.avg_fill_price = ParseDouble(data["avgPx"]);
-    report.fee = ParseDouble(data["fillFee"]);
-    report.SetFeeCurrency(data.get("feeCcy", "").asCString());
+    report.SetInstrument(inst_id_str.c_str());
+    report.SetOrderId(std::string(order_id).c_str());
+    report.status = OkxParseOrderState(state);
+    report.side = OkxParseSide(side.empty() ? "buy" : side);
+    report.market_type = DetectMarketType(inst_id_str.c_str());
+    report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+    (void)data["px"].get_double_in_string().get(report.price);
+    (void)data["accFillSz"].get_double_in_string().get(report.filled_volume);
+    (void)data["sz"].get_double_in_string().get(report.total_volume);
+    (void)data["avgPx"].get_double_in_string().get(report.avg_fill_price);
+    (void)data["fillFee"].get_double_in_string().get(report.fee);
+    report.SetFeeCurrency(std::string(fee_currency).c_str());
     on_order_update_(report);
 }
 
-void OkxClient::DecodeTicker(const Json::Value& data, const std::string& inst_id) {
+void OkxClient::DecodeTicker(simdjson::ondemand::value data, const std::string& inst_id) {
     if (!on_ticker_) {
         return;
     }
     Ticker ticker{};
-    ticker.exchange_ts_ms = ParseUint64(data["ts"]);
+    (void)data["ts"].get_uint64_in_string().get(ticker.exchange_ts_ms);
     ticker.local_ts_ns = NowNs();
     ticker.SetInstrument(inst_id.c_str());
     ticker.market_type = DetectMarketType(inst_id.c_str());
-    ticker.last_price = ParseDouble(data["last"]);
-    ticker.last_volume = ParseDouble(data["lastSz"]);
-    ticker.bid_price = ParseDouble(data["bidPx"]);
-    ticker.bid_volume = ParseDouble(data["bidSz"]);
-    ticker.ask_price = ParseDouble(data["askPx"]);
-    ticker.ask_volume = ParseDouble(data["askSz"]);
-    ticker.open_24h = ParseDouble(data["open24h"]);
-    ticker.high_24h = ParseDouble(data["high24h"]);
-    ticker.low_24h = ParseDouble(data["low24h"]);
-    ticker.volume_24h = ParseDouble(data["vol24h"]);
-    ticker.volume_currency_24h = ParseDouble(data["volCcy24h"]);
+    (void)data["last"].get_double_in_string().get(ticker.last_price);
+    (void)data["lastSz"].get_double_in_string().get(ticker.last_volume);
+    (void)data["bidPx"].get_double_in_string().get(ticker.bid_price);
+    (void)data["bidSz"].get_double_in_string().get(ticker.bid_volume);
+    (void)data["askPx"].get_double_in_string().get(ticker.ask_price);
+    (void)data["askSz"].get_double_in_string().get(ticker.ask_volume);
+    (void)data["open24h"].get_double_in_string().get(ticker.open_24h);
+    (void)data["high24h"].get_double_in_string().get(ticker.high_24h);
+    (void)data["low24h"].get_double_in_string().get(ticker.low_24h);
+    (void)data["vol24h"].get_double_in_string().get(ticker.volume_24h);
+    (void)data["volCcy24h"].get_double_in_string().get(ticker.volume_currency_24h);
     on_ticker_(ticker);
 }
 
-void OkxClient::DecodeBBO(const Json::Value& data, const std::string& inst_id) {
+void OkxClient::DecodeBBO(simdjson::ondemand::value data, const std::string& inst_id) {
     if (!on_bbo_) {
         return;
     }
     BBO bbo{};
-    bbo.exchange_ts_ms = ParseUint64(data["ts"]);
+    (void)data["ts"].get_uint64_in_string().get(bbo.exchange_ts_ms);
     bbo.local_ts_ns = NowNs();
     bbo.SetInstrument(inst_id.c_str());
     bbo.market_type = DetectMarketType(inst_id.c_str());
 
-    auto& bids = data["bids"];
-    auto& asks = data["asks"];
-    if (bids.isArray() && !bids.empty()) {
-        bbo.bid_price = ParseDouble(bids[0][0]);
-        bbo.bid_volume = ParseDouble(bids[0][1]);
+    simdjson::ondemand::array bids_array;
+    if (!data["bids"].get_array().get(bids_array)) {
+        for (auto bid_level : bids_array) {
+            simdjson::ondemand::array level_arr;
+            if (bid_level.get_array().get(level_arr)) {
+                break;
+            }
+            int idx = 0;
+            for (auto elem : level_arr) {
+                if (idx == 0) {
+                    (void)elem.get_double_in_string().get(bbo.bid_price);
+                } else if (idx == 1) {
+                    (void)elem.get_double_in_string().get(bbo.bid_volume);
+                }
+                if (++idx >= 2) {
+                    break;
+                }
+            }
+            break;
+        }
     }
-    if (asks.isArray() && !asks.empty()) {
-        bbo.ask_price = ParseDouble(asks[0][0]);
-        bbo.ask_volume = ParseDouble(asks[0][1]);
+
+    simdjson::ondemand::array asks_array;
+    if (!data["asks"].get_array().get(asks_array)) {
+        for (auto ask_level : asks_array) {
+            simdjson::ondemand::array level_arr;
+            if (ask_level.get_array().get(level_arr)) {
+                break;
+            }
+            int idx = 0;
+            for (auto elem : level_arr) {
+                if (idx == 0) {
+                    (void)elem.get_double_in_string().get(bbo.ask_price);
+                } else if (idx == 1) {
+                    (void)elem.get_double_in_string().get(bbo.ask_volume);
+                }
+                if (++idx >= 2) {
+                    break;
+                }
+            }
+            break;
+        }
     }
     on_bbo_(bbo);
 }
 
-void OkxClient::DecodeDepth(const Json::Value& data, const std::string& inst_id) {
+void OkxClient::DecodeDepth(simdjson::ondemand::value data, const std::string& inst_id) {
     if (!on_depth_) {
         return;
     }
     Depth depth{};
-    depth.exchange_ts_ms = ParseUint64(data["ts"]);
+    (void)data["ts"].get_uint64_in_string().get(depth.exchange_ts_ms);
     depth.local_ts_ns = NowNs();
     depth.SetInstrument(inst_id.c_str());
     depth.market_type = DetectMarketType(inst_id.c_str());
 
-    auto& asks = data["asks"];
-    auto& bids = data["bids"];
     depth.ask_levels = 0;
-    if (asks.isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < asks.size() && idx < MAX_DEPTH_LEVELS; ++idx) {
-            depth.asks[idx].price = ParseDouble(asks[idx][0]);
-            depth.asks[idx].volume = ParseDouble(asks[idx][1]);
-            depth.asks[idx].order_count = static_cast<int>(ParseUint64(asks[idx][3]));
+    simdjson::ondemand::array asks_array;
+    if (!data["asks"].get_array().get(asks_array)) {
+        for (auto level_result : asks_array) {
+            if (depth.ask_levels >= MAX_DEPTH_LEVELS) {
+                break;
+            }
+            simdjson::ondemand::array level_arr;
+            if (level_result.get_array().get(level_arr)) {
+                continue;
+            }
+            int idx = 0;
+            for (auto elem : level_arr) {
+                if (idx == 0) {
+                    (void)elem.get_double_in_string().get(depth.asks[depth.ask_levels].price);
+                } else if (idx == 1) {
+                    (void)elem.get_double_in_string().get(depth.asks[depth.ask_levels].volume);
+                } else if (idx == 3) {
+                    uint64_t count = 0;
+                    (void)elem.get_uint64_in_string().get(count);
+                    depth.asks[depth.ask_levels].order_count = static_cast<int>(count);
+                }
+                ++idx;
+                if (idx > 3) {
+                    break;
+                }
+            }
             ++depth.ask_levels;
         }
     }
+
     depth.bid_levels = 0;
-    if (bids.isArray()) {
-        for (Json::ArrayIndex idx = 0; idx < bids.size() && idx < MAX_DEPTH_LEVELS; ++idx) {
-            depth.bids[idx].price = ParseDouble(bids[idx][0]);
-            depth.bids[idx].volume = ParseDouble(bids[idx][1]);
-            depth.bids[idx].order_count = static_cast<int>(ParseUint64(bids[idx][3]));
+    simdjson::ondemand::array bids_array;
+    if (!data["bids"].get_array().get(bids_array)) {
+        for (auto level_result : bids_array) {
+            if (depth.bid_levels >= MAX_DEPTH_LEVELS) {
+                break;
+            }
+            simdjson::ondemand::array level_arr;
+            if (level_result.get_array().get(level_arr)) {
+                continue;
+            }
+            int idx = 0;
+            for (auto elem : level_arr) {
+                if (idx == 0) {
+                    (void)elem.get_double_in_string().get(depth.bids[depth.bid_levels].price);
+                } else if (idx == 1) {
+                    (void)elem.get_double_in_string().get(depth.bids[depth.bid_levels].volume);
+                } else if (idx == 3) {
+                    uint64_t count = 0;
+                    (void)elem.get_uint64_in_string().get(count);
+                    depth.bids[depth.bid_levels].order_count = static_cast<int>(count);
+                }
+                ++idx;
+                if (idx > 3) {
+                    break;
+                }
+            }
             ++depth.bid_levels;
         }
     }
     on_depth_(depth);
 }
 
-void OkxClient::DecodeTrade(const Json::Value& data, const std::string& inst_id) {
+void OkxClient::DecodeTrade(simdjson::ondemand::value data, const std::string& inst_id) {
     if (!on_trade_) {
         return;
     }
     Trade trade{};
-    trade.exchange_ts_ms = ParseUint64(data["ts"]);
+    (void)data["ts"].get_uint64_in_string().get(trade.exchange_ts_ms);
     trade.local_ts_ns = NowNs();
     trade.SetInstrument(inst_id.c_str());
     trade.market_type = DetectMarketType(inst_id.c_str());
-    std::strncpy(trade.trade_id, data.get("tradeId", "").asCString(), sizeof(trade.trade_id) - 1);
-    trade.trade_id[sizeof(trade.trade_id) - 1] = '\0';
-    trade.price = ParseDouble(data["px"]);
-    trade.volume = ParseDouble(data["sz"]);
-    trade.side = OkxParseSide(data.get("side", "buy").asCString());
+
+    std::string_view trade_id, side;
+    (void)data["tradeId"].get(trade_id);
+    (void)data["px"].get_double_in_string().get(trade.price);
+    (void)data["sz"].get_double_in_string().get(trade.volume);
+    (void)data["side"].get(side);
+
+    auto copy_len = std::min(trade_id.size(), sizeof(trade.trade_id) - 1);
+    std::memcpy(trade.trade_id, trade_id.data(), copy_len);
+    trade.trade_id[copy_len] = '\0';
+    trade.side = OkxParseSide(side.empty() ? "buy" : side);
     on_trade_(trade);
 }
 
-void OkxClient::DecodeAccountUpdate(const Json::Value& data) {
+void OkxClient::DecodeAccountUpdate(simdjson::ondemand::value data) {
     if (!on_balance_update_) {
         return;
     }
-    auto& details = data["details"];
-    if (!details.isArray()) {
+    simdjson::ondemand::array details_array;
+    if (data["details"].get_array().get(details_array)) {
         return;
     }
-    for (Json::ArrayIndex idx = 0; idx < details.size(); ++idx) {
-        std::string currency = details[idx].get("ccy", "").asString();
-        double available = ParseDouble(details[idx]["availBal"]);
-        double frozen = ParseDouble(details[idx]["frozenBal"]);
-        on_balance_update_(currency, available, frozen);
+    for (auto detail_result : details_array) {
+        simdjson::ondemand::value detail;
+        if (detail_result.get(detail)) {
+            continue;
+        }
+        std::string_view currency;
+        if (detail["ccy"].get(currency) || currency.empty()) {
+            continue;
+        }
+        double available = 0.0, frozen = 0.0;
+        (void)detail["availBal"].get_double_in_string().get(available);
+        (void)detail["frozenBal"].get_double_in_string().get(frozen);
+        on_balance_update_(std::string(currency), available, frozen);
     }
 }

@@ -15,11 +15,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 find_package(OpenSSL REQUIRED)
 
 add_subdirectory(third_party/quill EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/simdjson EXCLUDE_FROM_ALL)
 
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
@@ -29,10 +28,9 @@ add_library(exchange_client STATIC
 )
 target_include_directories(exchange_client PUBLIC
     ${SRC_DIR}
-    ${JSONCPP_INCLUDE_DIRS}
 )
 target_link_libraries(exchange_client PUBLIC
-    ${JSONCPP_LIBRARIES}
+    simdjson
     OpenSSL::Crypto
     OpenSSL::SSL
     quill::quill
@@ -48,6 +46,6 @@ add_executable(${TARGET_NAME}
     src/trading_engine/trading_engine.cpp
     src/trading_engine/position_manager.cpp
 )
-target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${JSONCPP_INCLUDE_DIRS})
+target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR})
 target_link_libraries(${TARGET_NAME} PRIVATE exchange_client rt)
 target_compile_options(${TARGET_NAME} PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
