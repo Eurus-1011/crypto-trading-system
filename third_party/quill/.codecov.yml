@@ -1,5 +1,0 @@
-ignore:
-  - "docs"
-  - "examples"
-  - "include/quill/bundled"
-  - "test"
