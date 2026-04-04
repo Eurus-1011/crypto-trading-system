@@ -91,6 +91,7 @@ class OkxClient : public ExchangeClient {
     std::string BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) override;
     void OnPublicMessage(const std::string& raw) override;
     void OnPrivateMessage(const std::string& raw) override;
+    bool ParseLoginResponse(const std::string& response) override;
 
     std::string GetPublicWsHost() override;
     std::string GetPublicWsPort() override;
@@ -109,12 +110,12 @@ class OkxClient : public ExchangeClient {
   private:
     std::vector<ExecutionReport> QueryPendingOrdersByType(const std::string& inst_type);
 
-    void DecodeTicker(const Json::Value& data, const std::string& inst_id);
-    void DecodeBBO(const Json::Value& data, const std::string& inst_id);
-    void DecodeDepth(const Json::Value& data, const std::string& inst_id);
-    void DecodeTrade(const Json::Value& data, const std::string& inst_id);
-    void DecodeOrderUpdate(const Json::Value& data);
-    void DecodeAccountUpdate(const Json::Value& data);
+    void DecodeTicker(simdjson::ondemand::value data, const std::string& inst_id);
+    void DecodeBBO(simdjson::ondemand::value data, const std::string& inst_id);
+    void DecodeDepth(simdjson::ondemand::value data, const std::string& inst_id);
+    void DecodeTrade(simdjson::ondemand::value data, const std::string& inst_id);
+    void DecodeOrderUpdate(simdjson::ondemand::value data);
+    void DecodeAccountUpdate(simdjson::ondemand::value data);
 
     std::string IsoTimestamp() const;
     std::string IsoTimestampForRest() const;
@@ -123,4 +124,6 @@ class OkxClient : public ExchangeClient {
     ExchangeConfig config_;
     std::map<std::string, int> inst_id_codes_;
     std::map<std::string, OrderRequest> pending_ws_ops_;
+    simdjson::ondemand::parser public_parser_;
+    simdjson::ondemand::parser private_parser_;
 };

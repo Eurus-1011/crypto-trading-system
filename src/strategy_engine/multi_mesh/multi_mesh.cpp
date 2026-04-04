@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-static bool ParsePosSide(const std::string& s, PosSide& out) {
+static bool ParsePosSide(std::string_view s, PosSide& out) {
     if (s == "long") {
         out = PosSide::LONG;
         return true;
@@ -23,18 +23,34 @@ static bool ParsePosSide(const std::string& s, PosSide& out) {
 
 REGISTER_STRATEGY(MultiMeshStrategy)
 
-void MultiMeshStrategy::Init(const Json::Value& params) {
-    if (!params.isMember("mesh") || !params["mesh"].isArray()) {
+void MultiMeshStrategy::Init(std::string_view params_json) {
+    if (params_json.empty()) {
+        ERROR("MultiMesh init failed: [REASON] empty params");
+        Stop();
+        return;
+    }
+
+    simdjson::dom::parser parser;
+    simdjson::padded_string padded(params_json);
+    auto doc = parser.parse(padded);
+    if (doc.error()) {
+        ERROR("MultiMesh init failed: [REASON] invalid params JSON");
+        Stop();
+        return;
+    }
+
+    auto mesh_array = doc["mesh"].get_array();
+    if (mesh_array.error()) {
         ERROR("MultiMesh init failed: [REASON] missing or invalid 'mesh' array");
         Stop();
         return;
     }
 
-    fee_rate_ = params.get("fee_rate", 0.001).asDouble();
+    double fee_rate_val;
+    fee_rate_ = doc["fee_rate"].get(fee_rate_val) ? 0.001 : fee_rate_val;
 
-    const auto& mesh_configs = params["mesh"];
-    for (Json::ArrayIndex i = 0; i < mesh_configs.size(); ++i) {
-        InitMesh(mesh_configs[i], fee_rate_);
+    for (auto mesh_element : mesh_array.value()) {
+        InitMesh(mesh_element, fee_rate_);
     }
 
     if (meshes_.empty()) {
@@ -47,11 +63,12 @@ void MultiMeshStrategy::Init(const Json::Value& params) {
     last_heartbeat_ts_ = std::chrono::steady_clock::now();
 }
 
-void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
-    std::string instrument = config.get("instrument", "").asString();
-    if (instrument.empty()) {
+void MultiMeshStrategy::InitMesh(simdjson::dom::element config, double fee_rate) {
+    std::string_view instrument_view;
+    if (config["instrument"].get(instrument_view) || instrument_view.empty()) {
         return;
     }
+    std::string instrument(instrument_view);
 
     auto dash_pos = instrument.find('-');
     if (dash_pos == std::string::npos) {
@@ -72,9 +89,10 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
         mesh.quote_currency = instrument.substr(dash_pos + 1);
     }
 
-    std::string position_side_str = config.get("position_side", "").asString();
+    std::string_view position_side_str;
+    (void)config["position_side"].get(position_side_str);
     if (position_side_str.empty() || !ParsePosSide(position_side_str, mesh.position_side)) {
-        ERROR("MultiMesh init failed: [REASON] missing or invalid 'position_side': '" + position_side_str +
+        ERROR("MultiMesh init failed: [REASON] missing or invalid 'position_side': '" + std::string(position_side_str) +
               "', [INSTRUMENT] " + instrument);
         return;
     }
@@ -82,11 +100,14 @@ void MultiMeshStrategy::InitMesh(const Json::Value& config, double fee_rate) {
         WARN("MultiMesh: SWAP instrument with position_side=net, [INSTRUMENT] " + instrument);
     }
 
-    mesh.upper_price = config.get("upper_price", 0.0).asDouble();
-    mesh.lower_price = config.get("lower_price", 0.0).asDouble();
-    double grid_size = config.get("grid_size", 0.0).asDouble();
-    mesh.active_grid_count = config.get("active_grid_count", 0).asInt();
-    mesh.grid_volume = config.get("grid_volume", 0.0).asDouble();
+    double upper_price, lower_price, grid_size, grid_volume;
+    int64_t active_grid_count;
+    mesh.upper_price = config["upper_price"].get(upper_price) ? 0.0 : upper_price;
+    mesh.lower_price = config["lower_price"].get(lower_price) ? 0.0 : lower_price;
+    grid_size = config["grid_size"].get(grid_size) ? 0.0 : grid_size;
+    mesh.active_grid_count =
+        config["active_grid_count"].get(active_grid_count) ? 0 : static_cast<int>(active_grid_count);
+    mesh.grid_volume = config["grid_volume"].get(grid_volume) ? 0.0 : grid_volume;
 
     if (mesh.upper_price <= mesh.lower_price || grid_size <= 0 || mesh.grid_volume <= 0 ||
         mesh.active_grid_count <= 0) {
@@ -282,6 +303,12 @@ void MultiMeshStrategy::Rebalance(MeshConfig* mesh) {
 
     for (int idx = 0; idx <= mesh->grid_count; ++idx) {
         if (idx == mesh->center_grid_idx) {
+            auto& center_grid = mesh->grids[idx];
+            if ((center_grid.state == GridState::BUY_PENDING || center_grid.state == GridState::SELL_PENDING) &&
+                !center_grid.order_id.empty()) {
+                EmitCancel(mesh->instrument.c_str(), center_grid.order_id.c_str(), mesh->market_type);
+                center_grid.state = GridState::CANCEL_PENDING;
+            }
             continue;
         }
         auto& grid = mesh->grids[idx];

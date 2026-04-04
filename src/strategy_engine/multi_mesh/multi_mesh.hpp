@@ -4,6 +4,8 @@
 
 #include <chrono>
 #include <map>
+#include <simdjson.h>
+#include <string_view>
 
 enum class GridState : int8_t { EMPTY, BUY_PENDING, SELL_PENDING, CANCEL_PENDING };
 
@@ -36,7 +38,7 @@ struct MeshConfig {
 
 class MultiMeshStrategy : public Strategy {
   public:
-    void Init(const Json::Value& params) override;
+    void Init(std::string_view params_json) override;
     void Reconstruct(const std::vector<ExecutionReport>& pending_orders) override;
     void OnBBO(const BBO& bbo) override;
     void OnExecutionReport(const ExecutionReport& report) override;
@@ -51,7 +53,7 @@ class MultiMeshStrategy : public Strategy {
     void PlaceBuyAtGrid(MeshConfig* mesh, int grid_index);
     void PlaceSellAtGrid(MeshConfig* mesh, int grid_index);
     void Rebalance(MeshConfig* mesh);
-    void InitMesh(const Json::Value& config, double fee_rate);
+    void InitMesh(simdjson::dom::element config, double fee_rate);
 
     std::map<std::string, MeshConfig> meshes_;
     double fee_rate_ = 0.001;

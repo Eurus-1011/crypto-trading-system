@@ -1,4 +1,7 @@
 {
+    "logger": {
+        "cpu_affinity":
+    },
     "exchange": {
         "name": "okx",
         "api_key": "",

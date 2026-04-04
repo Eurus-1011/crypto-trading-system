@@ -5,8 +5,8 @@
 
 #include <atomic>
 #include <functional>
-#include <json/json.h>
 #include <mutex>
+#include <simdjson.h>
 
 class ExchangeClient {
   public:
@@ -41,7 +41,6 @@ class ExchangeClient {
     ExchangeClient() = default;
 
     static std::string HmacSha256Sign(const std::string& key, const std::string& message);
-    static Json::Value ParseJson(const std::string& raw);
     static bool DetectHttpProxy(std::string& proxy_host, std::string& proxy_port);
 
     virtual std::string BuildSubscribeMessage(const std::string& channel, const std::string& instrument) = 0;
@@ -51,6 +50,8 @@ class ExchangeClient {
     virtual std::string BuildCancelOrderMessage(const std::string& instrument, const std::string& order_id) = 0;
     virtual void OnPublicMessage(const std::string& raw) = 0;
     virtual void OnPrivateMessage(const std::string& raw) = 0;
+
+    virtual bool ParseLoginResponse(const std::string& response) = 0;
 
     virtual std::string GetPublicWsHost() = 0;
     virtual std::string GetPublicWsPort() = 0;

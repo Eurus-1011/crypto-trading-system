@@ -1,56 +1,44 @@
 #pragma once
 
-#include <cassert>
-#include <cstdio>
-#include <ctime>
-#include <mutex>
-#include <string>
+#include "quill/Backend.h"
+#include "quill/Frontend.h"
+#include "quill/LogMacros.h"
+#include "quill/Logger.h"
+#include "quill/core/PatternFormatterOptions.h"
+#include "quill/sinks/FileSink.h"
 
-enum LogLevel { kInfo = 0, kWarning = 1, kError = 2 };
+inline std::atomic<quill::Logger*> global_logger_ptr{nullptr};
 
-static constexpr const char* kLevelStr[] = {"INFO", "WARN", "ERROR"};
-
-class Logger {
-  public:
-    explicit Logger(const std::string& path) : fp_(std::fopen(path.c_str(), "a")) { assert(fp_); }
-
-    ~Logger() {
-        if (fp_) {
-            std::fclose(fp_);
-        }
+inline void InitLog(const std::string& path, int cpu_affinity) {
+    quill::BackendOptions backend_options;
+    backend_options.thread_name = "LoggerBackend";
+    backend_options.log_level_descriptions[static_cast<uint32_t>(quill::LogLevel::Warning)] = "WARN";
+    if (cpu_affinity >= 0) {
+        backend_options.cpu_affinity = static_cast<uint16_t>(cpu_affinity);
     }
+    quill::Backend::start(backend_options);
 
-    void log(LogLevel level, const char* msg) {
-        std::time_t now = std::time(nullptr);
-        std::tm t{};
-        char time_buf[32];
-        localtime_r(&now, &t);
-        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &t);
-        std::lock_guard<std::mutex> lk(mutex_);
-        std::fprintf(fp_, "%s [%s] %s\n", time_buf, kLevelStr[level], msg);
-        std::fflush(fp_);
-    }
+    quill::FileSinkConfig file_sink_config;
+    file_sink_config.set_open_mode('w');
+    auto file_sink = quill::Frontend::create_or_get_sink<quill::FileSink>(path, file_sink_config);
 
-    void log(LogLevel level, const std::string& msg) { log(level, msg.c_str()); }
+    quill::PatternFormatterOptions formatter_options;
+    formatter_options.format_pattern = "%(time) [%(log_level)] %(message)";
+    formatter_options.timestamp_pattern = "%Y-%m-%d %H:%M:%S";
 
-  private:
-    std::FILE* fp_;
-    std::mutex mutex_;
-};
-
-inline Logger*& GetLogPtr() {
-    static Logger* p = nullptr;
-    return p;
+    auto* logger = quill::Frontend::create_or_get_logger("root", std::move(file_sink), formatter_options);
+    global_logger_ptr.store(logger, std::memory_order_release);
 }
 
-inline void InitLog(const std::string& path) {
-    Logger*& p = GetLogPtr();
-    if (p) {
-        delete p;
+inline void ShutdownLog() {
+    if (auto* logger = global_logger_ptr.load(std::memory_order_acquire)) {
+        logger->flush_log();
+        quill::Backend::stop();
     }
-    p = new Logger(path);
 }
 
-inline void INFO(const std::string& msg) { GetLogPtr()->log(kInfo, msg); }
-inline void WARN(const std::string& msg) { GetLogPtr()->log(kWarning, msg); }
-inline void ERROR(const std::string& msg) { GetLogPtr()->log(kError, msg); }
+inline void INFO(const std::string& msg) { LOG_INFO(global_logger_ptr.load(std::memory_order_relaxed), "{}", msg); }
+
+inline void WARN(const std::string& msg) { LOG_WARNING(global_logger_ptr.load(std::memory_order_relaxed), "{}", msg); }
+
+inline void ERROR(const std::string& msg) { LOG_ERROR(global_logger_ptr.load(std::memory_order_relaxed), "{}", msg); }

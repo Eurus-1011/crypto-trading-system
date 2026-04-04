@@ -39,10 +39,8 @@ static std::string JoinStrings(const std::vector<std::string>& vec) {
 }
 
 int main(int argc, char* argv[]) {
-    InitLog(LOG_PATH);
-
     if (argc < 2) {
-        ERROR("Usage: crypto-trading-system <config_path>");
+        std::fprintf(stderr, "Usage: crypto-trading-system <config_path>\n");
         return 1;
     }
     std::string config_path = argv[1];
@@ -50,9 +48,11 @@ int main(int argc, char* argv[]) {
     SystemConfig config;
     std::string err;
     if (!LoadConfig(config_path, config, err)) {
-        ERROR("Load config failed: [DETAIL] " + err);
+        std::fprintf(stderr, "Load config failed: %s\n", err.c_str());
         return 1;
     }
+
+    InitLog(LOG_PATH, config.logger.cpu_affinity);
 
     INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [INSTRUMENTS] " +
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +
@@ -111,5 +111,6 @@ int main(int argc, char* argv[]) {
     shm_destroy(SHM_EXECUTION_REPORT, report_ring);
 
     INFO("System shutdown complete");
+    ShutdownLog();
     return 0;
 }

@@ -3,7 +3,7 @@
 #include "common/defs.hpp"
 #include "trading_engine/position_manager.hpp"
 
-#include <json/json.h>
+#include <string_view>
 #include <vector>
 
 class Strategy {
@@ -13,7 +13,7 @@ class Strategy {
     void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
     void SetPositionManager(PositionManager* position_manager) { position_manager_ = position_manager; }
 
-    virtual void Init(const Json::Value& params) = 0;
+    virtual void Init(std::string_view params_json) = 0;
     virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
     virtual void OnTicker(const Ticker& ticker) {}
     virtual void OnBBO(const BBO& bbo) {}
