@@ -26,7 +26,7 @@ class StrategyEngine {
     TradeRing* trade_ring_;
     SignalRing* signal_ring_;
     ExecutionReportRing* report_ring_;
-    PositionManager* position_manager_ = nullptr;
+    PositionManager* position_manager_;
     StrategyFactory factory_;
     std::atomic<bool> running_{true};
     std::vector<ExecutionReport> pending_orders_;

@@ -13,9 +13,7 @@ StrategyEngine::StrategyEngine(const SystemConfig& config, TickerRing* ticker_ri
       signal_ring_(signal_ring), report_ring_(report_ring) {}
 
 void StrategyEngine::Run() {
-    if (!config_.strategy_engine.cpu_affinity.empty()) {
-        BindThreadToCpus(config_.strategy_engine.cpu_affinity);
-    }
+    BindThreadToCpus(config_.strategy_engine.cpu_affinity);
 
     auto strategy = factory_ ? factory_() : nullptr;
     if (!strategy) {

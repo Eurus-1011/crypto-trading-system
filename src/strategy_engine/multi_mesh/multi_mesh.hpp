@@ -10,8 +10,8 @@
 enum class GridState : int8_t { EMPTY, BUY_PENDING, SELL_PENDING, CANCEL_PENDING };
 
 struct GridLevel {
-    double price;
-    double volume;
+    Price price;
+    Volume volume;
     GridState state = GridState::EMPTY;
     std::string order_id;
 };
@@ -22,18 +22,20 @@ struct MeshConfig {
     std::string quote_currency;
     MarketType market_type;
     PosSide position_side;
-    double upper_price = 0.0;
-    double lower_price = 0.0;
+    int price_precision = 0;
+    int volume_precision = 0;
+    Price upper_price = 0;
+    Price lower_price = 0;
     int grid_count = 0;
     int active_grid_count = 0;
-    double grid_step = 0.0;
-    double grid_volume = 0.0;
+    Price grid_step = 0;
+    Volume grid_volume = 0;
 
     std::vector<GridLevel> grids;
     int center_grid_idx = -1;
 
-    double last_bid = 0.0;
-    double last_ask = 0.0;
+    Price last_bid = 0;
+    Price last_ask = 0;
 };
 
 class MultiMeshStrategy : public Strategy {
@@ -48,7 +50,7 @@ class MultiMeshStrategy : public Strategy {
     MeshConfig* FindMesh(const char* instrument);
     const MeshConfig* FindMesh(const char* instrument) const;
     int FindGridByOrderId(MeshConfig* mesh, const std::string& order_id) const;
-    int FindGridByPriceAndState(MeshConfig* mesh, double price, GridState expected_state) const;
+    int FindGridByPriceAndState(MeshConfig* mesh, Price price, GridState expected_state) const;
     bool TryAdoptOrder(MeshConfig* mesh, const ExecutionReport& report);
     void PlaceBuyAtGrid(MeshConfig* mesh, int grid_index);
     void PlaceSellAtGrid(MeshConfig* mesh, int grid_index);

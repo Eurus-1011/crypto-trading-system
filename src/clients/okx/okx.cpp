@@ -134,29 +134,29 @@ bool OkxClient::ParseLoginResponse(const std::string& response) {
     return true;
 }
 
-void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments) {
+void OkxClient::FetchInstrumentInfo(const std::vector<std::string>& instruments) {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
     simdjson::ondemand::parser parser;
     for (const auto& instrument : instruments) {
         const char* inst_type = kOkxInstType.at(DetectMarketType(instrument.c_str()));
-        std::string path = std::string("/api/v5/public/instruments?instType=") + inst_type + "&instId=" + instrument;
-        std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, "", "", proxy_host, proxy_port);
+        std::string path = std::string(OkxApiInstruments) + "?instType=" + inst_type + "&instId=" + instrument;
+        std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, "", "", proxy_host, proxy_port);
         if (raw_body.empty()) {
-            WARN("FetchInstrumentCodes failed: [INSTRUMENT] " + instrument);
+            WARN("FetchInstrumentInfo failed: [INSTRUMENT] " + instrument);
             continue;
         }
         auto json_start = raw_body.find('{');
         if (json_start == std::string::npos) {
-            WARN("FetchInstrumentCodes invalid response: [INSTRUMENT] " + instrument);
+            WARN("FetchInstrumentInfo invalid response: [INSTRUMENT] " + instrument);
             continue;
         }
 
         simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
         simdjson::ondemand::document doc;
         if (parser.iterate(padded_body).get(doc)) {
-            WARN("FetchInstrumentCodes parse failed: [INSTRUMENT] " + instrument);
+            WARN("FetchInstrumentInfo parse failed: [INSTRUMENT] " + instrument);
             continue;
         }
 
@@ -164,13 +164,13 @@ void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments
         if (doc["code"].get(code_str) || code_str != "0") {
             std::string_view msg_str;
             (void)doc["msg"].get(msg_str);
-            WARN("FetchInstrumentCodes error: [INSTRUMENT] " + instrument + ", [MSG] " + std::string(msg_str));
+            WARN("FetchInstrumentInfo error: [INSTRUMENT] " + instrument + ", [MSG] " + std::string(msg_str));
             continue;
         }
 
         simdjson::ondemand::array data_array;
         if (doc["data"].get_array().get(data_array)) {
-            WARN("FetchInstrumentCodes empty data: [INSTRUMENT] " + instrument);
+            WARN("FetchInstrumentInfo empty data: [INSTRUMENT] " + instrument);
             continue;
         }
 
@@ -178,7 +178,20 @@ void OkxClient::FetchInstrumentCodes(const std::vector<std::string>& instruments
             int64_t code_val = 0;
             (void)element["instIdCode"].get_int64().get(code_val);
             inst_id_codes_[instrument] = static_cast<int>(code_val);
-            INFO("Fetch instIdCode: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code_val));
+
+            std::string_view tick_sz_value, lot_sz_value;
+            (void)element["tickSz"].get_string().get(tick_sz_value);
+            (void)element["lotSz"].get_string().get(lot_sz_value);
+
+            InstrumentInfo info;
+            info.SetInstrument(instrument.c_str());
+            info.price_precision = CountDecimalPlaces(std::string(tick_sz_value).c_str());
+            info.volume_precision = CountDecimalPlaces(std::string(lot_sz_value).c_str());
+            InstrumentRegistry::Instance().Add(info);
+
+            INFO("Fetch instrument info: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code_val) +
+                 ", [PRICE_PRECISION] " + std::to_string(info.price_precision) +
+                 ", [VOLUME_PRECISION] " + std::to_string(info.volume_precision));
             break;
         }
     }
@@ -192,7 +205,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
     simdjson::ondemand::parser parser;
     std::string after_cursor;
     while (true) {
-        std::string path = "/api/v5/trade/orders-pending?instType=" + inst_type;
+        std::string path = std::string(OkxApiOrdersPending) + "?instType=" + inst_type;
         if (!after_cursor.empty()) {
             path += "&after=" + after_cursor;
         }
@@ -210,7 +223,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
                               "OK-ACCESS-PASSPHRASE: " +
                               config_.passphrase + "\r\n";
 
-        std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, headers, "", proxy_host, proxy_port);
+        std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
         if (raw_body.empty()) {
             WARN("Query pending orders failed: [INST_TYPE] " + inst_type);
             break;
@@ -262,16 +275,21 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             std::string order_id_str(order_id);
 
             ExecutionReport report{};
-            report.timestamp_ns = NowNs();
             report.SetInstrument(std::string(inst_id).c_str());
             report.SetOrderId(order_id_str.c_str());
             report.status = OkxParseOrderState(state);
             report.side = OkxParseSide(side.empty() ? "buy" : side);
             report.market_type = market_type;
             report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
-            (void)order_element["px"].get_double_in_string().get(report.price);
-            (void)order_element["accFillSz"].get_double_in_string().get(report.filled_volume);
-            (void)order_element["sz"].get_double_in_string().get(report.total_volume);
+
+            const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+            double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
+            (void)order_element["px"].get_double_in_string().get(px_value);
+            (void)order_element["accFillSz"].get_double_in_string().get(acc_fill_sz_value);
+            (void)order_element["sz"].get_double_in_string().get(sz_value);
+            report.price = Encode(px_value, info.price_precision);
+            report.filled_volume = Encode(acc_fill_sz_value, info.volume_precision);
+            report.total_volume = Encode(sz_value, info.volume_precision);
             (void)order_element["avgPx"].get_double_in_string().get(report.avg_fill_price);
             result.push_back(report);
 
@@ -303,7 +321,7 @@ std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
-    std::string path = "/api/v5/account/balance";
+    std::string path = OkxApiBalance;
     std::string timestamp = IsoTimestampForRest();
     std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
     std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
@@ -317,7 +335,7 @@ std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
                           "OK-ACCESS-PASSPHRASE: " +
                           config_.passphrase + "\r\n";
 
-    std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, headers, "", proxy_host, proxy_port);
+    std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
     std::map<std::string, std::pair<double, double>> result;
     if (raw_body.empty()) {
         return result;
@@ -381,7 +399,7 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
-    std::string path = "/api/v5/account/positions?instType=SWAP";
+    std::string path = std::string(OkxApiPositions) + "?instType=SWAP";
     std::string timestamp = IsoTimestampForRest();
     std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
     std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
@@ -395,7 +413,7 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
                           "OK-ACCESS-PASSPHRASE: " +
                           config_.passphrase + "\r\n";
 
-    std::string raw_body = HttpsRequest("www.okx.com", "443", "GET", path, headers, "", proxy_host, proxy_port);
+    std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
     std::map<std::string, std::map<PosSide, SwapPosition>> result;
     if (raw_body.empty()) {
         return result;
@@ -542,17 +560,18 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
                 if (it != pending_ws_ops_.end()) {
                     const auto& req = it->second;
                     ExecutionReport report{};
-                    report.timestamp_ns = NowNs();
                     report.SetInstrument(req.instrument.c_str());
                     report.status = OrderStatus::REJECTED;
                     report.side = req.side;
                     report.market_type = req.market_type;
                     report.position_side = req.position_side;
                     if (!req.price.empty()) {
-                        report.price = std::stod(req.price);
+                        const auto* info = InstrumentRegistry::Instance().Find(req.instrument.c_str());
+                        report.price = info ? Encode(std::stod(req.price), info->price_precision) : 0;
                     }
                     if (!req.size.empty()) {
-                        report.total_volume = std::stod(req.size);
+                        const auto* info = InstrumentRegistry::Instance().Find(req.instrument.c_str());
+                        report.total_volume = info ? Encode(std::stod(req.size), info->volume_precision) : 0;
                     }
                     on_order_update_(report);
                     pending_ws_ops_.erase(it);
@@ -589,10 +608,6 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
 }
 
 void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
-    if (!on_order_update_) {
-        return;
-    }
-
     std::string_view inst_id, order_id, state, side, pos_side, fee_currency;
     (void)data["instId"].get(inst_id);
     (void)data["ordId"].get(order_id);
@@ -604,16 +619,21 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     std::string inst_id_str(inst_id);
 
     ExecutionReport report{};
-    report.timestamp_ns = NowNs();
     report.SetInstrument(inst_id_str.c_str());
     report.SetOrderId(std::string(order_id).c_str());
     report.status = OkxParseOrderState(state);
     report.side = OkxParseSide(side.empty() ? "buy" : side);
     report.market_type = DetectMarketType(inst_id_str.c_str());
     report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
-    (void)data["px"].get_double_in_string().get(report.price);
-    (void)data["accFillSz"].get_double_in_string().get(report.filled_volume);
-    (void)data["sz"].get_double_in_string().get(report.total_volume);
+
+    const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+    double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
+    (void)data["px"].get_double_in_string().get(px_value);
+    (void)data["accFillSz"].get_double_in_string().get(acc_fill_sz_value);
+    (void)data["sz"].get_double_in_string().get(sz_value);
+    report.price = Encode(px_value, info.price_precision);
+    report.filled_volume = Encode(acc_fill_sz_value, info.volume_precision);
+    report.total_volume = Encode(sz_value, info.volume_precision);
     (void)data["avgPx"].get_double_in_string().get(report.avg_fill_price);
     (void)data["fillFee"].get_double_in_string().get(report.fee);
     report.SetFeeCurrency(std::string(fee_currency).c_str());
@@ -621,37 +641,42 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
 }
 
 void OkxClient::DecodeTicker(simdjson::ondemand::value data, const std::string& inst_id) {
-    if (!on_ticker_) {
-        return;
-    }
     Ticker ticker{};
-    (void)data["ts"].get_uint64_in_string().get(ticker.exchange_ts_ms);
-    ticker.local_ts_ns = NowNs();
     ticker.SetInstrument(inst_id.c_str());
     ticker.market_type = DetectMarketType(inst_id.c_str());
-    (void)data["last"].get_double_in_string().get(ticker.last_price);
-    (void)data["lastSz"].get_double_in_string().get(ticker.last_volume);
-    (void)data["bidPx"].get_double_in_string().get(ticker.bid_price);
-    (void)data["bidSz"].get_double_in_string().get(ticker.bid_volume);
-    (void)data["askPx"].get_double_in_string().get(ticker.ask_price);
-    (void)data["askSz"].get_double_in_string().get(ticker.ask_volume);
-    (void)data["open24h"].get_double_in_string().get(ticker.open_24h);
-    (void)data["high24h"].get_double_in_string().get(ticker.high_24h);
-    (void)data["low24h"].get_double_in_string().get(ticker.low_24h);
-    (void)data["vol24h"].get_double_in_string().get(ticker.volume_24h);
+
+    const auto& info = InstrumentRegistry::Instance().Get(ticker.instrument);
+    double value = 0.0;
+    (void)data["last"].get_double_in_string().get(value);
+    ticker.last_price = Encode(value, info.price_precision);
+    (void)data["lastSz"].get_double_in_string().get(value);
+    ticker.last_volume = Encode(value, info.volume_precision);
+    (void)data["bidPx"].get_double_in_string().get(value);
+    ticker.bid_price = Encode(value, info.price_precision);
+    (void)data["bidSz"].get_double_in_string().get(value);
+    ticker.bid_volume = Encode(value, info.volume_precision);
+    (void)data["askPx"].get_double_in_string().get(value);
+    ticker.ask_price = Encode(value, info.price_precision);
+    (void)data["askSz"].get_double_in_string().get(value);
+    ticker.ask_volume = Encode(value, info.volume_precision);
+    (void)data["open24h"].get_double_in_string().get(value);
+    ticker.open_24h = Encode(value, info.price_precision);
+    (void)data["high24h"].get_double_in_string().get(value);
+    ticker.high_24h = Encode(value, info.price_precision);
+    (void)data["low24h"].get_double_in_string().get(value);
+    ticker.low_24h = Encode(value, info.price_precision);
+    (void)data["vol24h"].get_double_in_string().get(value);
+    ticker.volume_24h = Encode(value, info.volume_precision);
     (void)data["volCcy24h"].get_double_in_string().get(ticker.volume_currency_24h);
     on_ticker_(ticker);
 }
 
 void OkxClient::DecodeBBO(simdjson::ondemand::value data, const std::string& inst_id) {
-    if (!on_bbo_) {
-        return;
-    }
     BBO bbo{};
-    (void)data["ts"].get_uint64_in_string().get(bbo.exchange_ts_ms);
-    bbo.local_ts_ns = NowNs();
     bbo.SetInstrument(inst_id.c_str());
     bbo.market_type = DetectMarketType(inst_id.c_str());
+
+    const auto& info = InstrumentRegistry::Instance().Get(bbo.instrument);
 
     simdjson::ondemand::array bids_array;
     if (!data["bids"].get_array().get(bids_array)) {
@@ -661,11 +686,14 @@ void OkxClient::DecodeBBO(simdjson::ondemand::value data, const std::string& ins
                 break;
             }
             int idx = 0;
+            double value = 0.0;
             for (auto elem : level_arr) {
                 if (idx == 0) {
-                    (void)elem.get_double_in_string().get(bbo.bid_price);
+                    (void)elem.get_double_in_string().get(value);
+                    bbo.bid_price = Encode(value, info.price_precision);
                 } else if (idx == 1) {
-                    (void)elem.get_double_in_string().get(bbo.bid_volume);
+                    (void)elem.get_double_in_string().get(value);
+                    bbo.bid_volume = Encode(value, info.volume_precision);
                 }
                 if (++idx >= 2) {
                     break;
@@ -683,11 +711,14 @@ void OkxClient::DecodeBBO(simdjson::ondemand::value data, const std::string& ins
                 break;
             }
             int idx = 0;
+            double value = 0.0;
             for (auto elem : level_arr) {
                 if (idx == 0) {
-                    (void)elem.get_double_in_string().get(bbo.ask_price);
+                    (void)elem.get_double_in_string().get(value);
+                    bbo.ask_price = Encode(value, info.price_precision);
                 } else if (idx == 1) {
-                    (void)elem.get_double_in_string().get(bbo.ask_volume);
+                    (void)elem.get_double_in_string().get(value);
+                    bbo.ask_volume = Encode(value, info.volume_precision);
                 }
                 if (++idx >= 2) {
                     break;
@@ -700,14 +731,11 @@ void OkxClient::DecodeBBO(simdjson::ondemand::value data, const std::string& ins
 }
 
 void OkxClient::DecodeDepth(simdjson::ondemand::value data, const std::string& inst_id) {
-    if (!on_depth_) {
-        return;
-    }
     Depth depth{};
-    (void)data["ts"].get_uint64_in_string().get(depth.exchange_ts_ms);
-    depth.local_ts_ns = NowNs();
     depth.SetInstrument(inst_id.c_str());
     depth.market_type = DetectMarketType(inst_id.c_str());
+
+    const auto& info = InstrumentRegistry::Instance().Get(depth.instrument);
 
     depth.ask_levels = 0;
     simdjson::ondemand::array asks_array;
@@ -721,11 +749,14 @@ void OkxClient::DecodeDepth(simdjson::ondemand::value data, const std::string& i
                 continue;
             }
             int idx = 0;
+            double value = 0.0;
             for (auto elem : level_arr) {
                 if (idx == 0) {
-                    (void)elem.get_double_in_string().get(depth.asks[depth.ask_levels].price);
+                    (void)elem.get_double_in_string().get(value);
+                    depth.asks[depth.ask_levels].price = Encode(value, info.price_precision);
                 } else if (idx == 1) {
-                    (void)elem.get_double_in_string().get(depth.asks[depth.ask_levels].volume);
+                    (void)elem.get_double_in_string().get(value);
+                    depth.asks[depth.ask_levels].volume = Encode(value, info.volume_precision);
                 } else if (idx == 3) {
                     uint64_t count = 0;
                     (void)elem.get_uint64_in_string().get(count);
@@ -752,11 +783,14 @@ void OkxClient::DecodeDepth(simdjson::ondemand::value data, const std::string& i
                 continue;
             }
             int idx = 0;
+            double value = 0.0;
             for (auto elem : level_arr) {
                 if (idx == 0) {
-                    (void)elem.get_double_in_string().get(depth.bids[depth.bid_levels].price);
+                    (void)elem.get_double_in_string().get(value);
+                    depth.bids[depth.bid_levels].price = Encode(value, info.price_precision);
                 } else if (idx == 1) {
-                    (void)elem.get_double_in_string().get(depth.bids[depth.bid_levels].volume);
+                    (void)elem.get_double_in_string().get(value);
+                    depth.bids[depth.bid_levels].volume = Encode(value, info.volume_precision);
                 } else if (idx == 3) {
                     uint64_t count = 0;
                     (void)elem.get_uint64_in_string().get(count);
@@ -774,19 +808,18 @@ void OkxClient::DecodeDepth(simdjson::ondemand::value data, const std::string& i
 }
 
 void OkxClient::DecodeTrade(simdjson::ondemand::value data, const std::string& inst_id) {
-    if (!on_trade_) {
-        return;
-    }
     Trade trade{};
-    (void)data["ts"].get_uint64_in_string().get(trade.exchange_ts_ms);
-    trade.local_ts_ns = NowNs();
     trade.SetInstrument(inst_id.c_str());
     trade.market_type = DetectMarketType(inst_id.c_str());
 
+    const auto& info = InstrumentRegistry::Instance().Get(trade.instrument);
     std::string_view trade_id, side;
+    double value = 0.0;
     (void)data["tradeId"].get(trade_id);
-    (void)data["px"].get_double_in_string().get(trade.price);
-    (void)data["sz"].get_double_in_string().get(trade.volume);
+    (void)data["px"].get_double_in_string().get(value);
+    trade.price = Encode(value, info.price_precision);
+    (void)data["sz"].get_double_in_string().get(value);
+    trade.volume = Encode(value, info.volume_precision);
     (void)data["side"].get(side);
 
     auto copy_len = std::min(trade_id.size(), sizeof(trade.trade_id) - 1);
@@ -797,9 +830,6 @@ void OkxClient::DecodeTrade(simdjson::ondemand::value data, const std::string& i
 }
 
 void OkxClient::DecodeAccountUpdate(simdjson::ondemand::value data) {
-    if (!on_balance_update_) {
-        return;
-    }
     simdjson::ondemand::array details_array;
     if (data["details"].get_array().get(details_array)) {
         return;

@@ -18,5 +18,5 @@ class QuotationEngine {
     BBORing* bbo_ring_;
     DepthRing* depth_ring_;
     TradeRing* trade_ring_;
-    ExchangeClient* client_ = nullptr;
+    ExchangeClient* client_;
 };
