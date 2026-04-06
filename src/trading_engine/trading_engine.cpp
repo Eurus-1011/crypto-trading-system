@@ -32,8 +32,8 @@ void TradingEngine::Init() {
     position_manager_.InitSpotFromExchange(balances);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
-    client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen) {
-        position_manager_.SyncSpotFromExchange(currency, available, frozen);
+    client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen, double borrowed) {
+        position_manager_.SyncSpotFromExchange(currency, available, frozen, borrowed);
     });
 
     std::thread listener_thread([this]() { RunOrderListener(); });
@@ -99,6 +99,7 @@ void TradingEngine::RunOrderDispatcher() {
             request.order_type = signal.order_type;
             request.market_type = signal.market_type;
             request.position_side = signal.position_side;
+            request.trade_mode = signal.trade_mode;
 
             const auto& info = InstrumentRegistry::Instance().Get(signal.instrument);
             request.size = Format(signal.volume, info.volume_precision);
@@ -121,7 +122,8 @@ void TradingEngine::RunReconciler() {
 
         auto balances = client_->QueryBalances();
         for (const auto& [currency, balance] : balances) {
-            position_manager_.SyncSpotFromExchange(currency, balance.first, balance.second);
+            position_manager_.SyncSpotFromExchange(currency, std::get<0>(balance), std::get<1>(balance),
+                                                   std::get<2>(balance));
         }
 
         auto swap_positions = client_->QuerySwapPositions();
@@ -145,7 +147,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         if (report.market_type == MarketType::SWAP) {
             position_manager_.UpdateSwapOnFill(report);
         } else {
-            position_manager_.UpdateSpotOnFill(report);
+            position_manager_.UpdateSpotOnFill(report, report.trade_mode);
         }
         if (report.status == OrderStatus::PARTIALLY_FILLED) {
             INFO("Order partially filled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " +
@@ -162,7 +164,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
             position_manager_.UpdateSwapOnCancel(report);
             INFO("Order cancelled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str);
         } else {
-            position_manager_.UpdateSpotOnCancel(report);
+            position_manager_.UpdateSpotOnCancel(report, report.trade_mode);
             double remaining = Decode(report.total_volume - report.filled_volume, info->volume_precision);
             std::string currency = LockedCurrency(report.instrument, report.side);
             double available = position_manager_.GetSpotPosition(currency).available;
@@ -173,11 +175,11 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         if (report.market_type == MarketType::SWAP) {
             position_manager_.UpdateSwapOnRejected(report);
         } else {
-            position_manager_.UpdateSpotOnRejected(report);
+            position_manager_.UpdateSpotOnRejected(report, report.trade_mode);
         }
     } else if (report.status == OrderStatus::NEW) {
         if (report.market_type != MarketType::SWAP) {
-            position_manager_.UpdateSpotOnNew(report);
+            position_manager_.UpdateSpotOnNew(report, report.trade_mode);
             std::string currency = LockedCurrency(report.instrument, report.side);
             auto pos = position_manager_.GetSpotPosition(currency);
             INFO("Order new: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +

@@ -19,7 +19,7 @@ class ExchangeClient {
     void OnDepth(std::function<void(const Depth&)> cb) { on_depth_ = std::move(cb); }
     void OnTrade(std::function<void(const Trade&)> cb) { on_trade_ = std::move(cb); }
     void OnOrderUpdate(std::function<void(const ExecutionReport&)> cb) { on_order_update_ = std::move(cb); }
-    void OnBalanceUpdate(std::function<void(const std::string&, double, double)> cb) {
+    void OnBalanceUpdate(std::function<void(const std::string&, double, double, double)> cb) {
         on_balance_update_ = std::move(cb);
     }
 
@@ -69,7 +69,7 @@ class ExchangeClient {
     std::function<void(const Depth&)> on_depth_;
     std::function<void(const Trade&)> on_trade_;
     std::function<void(const ExecutionReport&)> on_order_update_;
-    std::function<void(const std::string&, double, double)> on_balance_update_;
+    std::function<void(const std::string&, double, double, double)> on_balance_update_;
 
     struct PendingSub {
         std::string channel;

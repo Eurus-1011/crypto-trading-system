@@ -15,7 +15,7 @@ static std::string ExtractQuote(const char* instrument) {
 }
 
 void Strategy::EmitBuy(const char* instrument, OrderType order_type, Price price, Volume volume, MarketType market_type,
-                       PosSide position_side) {
+                       PosSide position_side, TradeMode trade_mode) {
     if (market_type == MarketType::SPOT) {
         const auto& info = InstrumentRegistry::Instance().Get(instrument);
         position_manager_->ReserveSpot(ExtractQuote(instrument),
@@ -27,14 +27,15 @@ void Strategy::EmitBuy(const char* instrument, OrderType order_type, Price price
     signal.order_type = order_type;
     signal.market_type = market_type;
     signal.position_side = position_side;
+    signal.trade_mode = trade_mode;
     signal.price = price;
     signal.volume = volume;
     shm_push(signal_ring_, signal);
 }
 
 void Strategy::EmitSell(const char* instrument, OrderType order_type, Price price, Volume volume,
-                        MarketType market_type, PosSide position_side) {
-    if (market_type == MarketType::SPOT) {
+                        MarketType market_type, PosSide position_side, TradeMode trade_mode) {
+    if (market_type == MarketType::SPOT && trade_mode == TradeMode::CASH) {
         const auto& info = InstrumentRegistry::Instance().Get(instrument);
         position_manager_->ReserveSpot(ExtractBase(instrument), Decode(volume, info.volume_precision));
     }
@@ -44,6 +45,7 @@ void Strategy::EmitSell(const char* instrument, OrderType order_type, Price pric
     signal.order_type = order_type;
     signal.market_type = market_type;
     signal.position_side = position_side;
+    signal.trade_mode = trade_mode;
     signal.price = price;
     signal.volume = volume;
     shm_push(signal_ring_, signal);

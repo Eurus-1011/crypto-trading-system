@@ -16,6 +16,7 @@ enum class Side : int8_t { BUY, SELL };
 enum class PosSide : int8_t { NET, LONG, SHORT };
 enum class Action : int8_t { BUY, SELL, CANCEL };
 enum class OrderType : int8_t { MARKET, LIMIT };
+enum class TradeMode : int8_t { CASH, CROSS, ISOLATED };
 enum class OrderStatus : int8_t { NEW, FILLED, PARTIALLY_FILLED, CANCELLED, CANCEL_FAILED, REJECTED };
 
 inline const char* ToString(MarketType v) {
@@ -68,6 +69,18 @@ inline const char* ToString(OrderType v) {
         return "MARKET";
     case OrderType::LIMIT:
         return "LIMIT";
+    }
+    std::unreachable();
+}
+
+inline const char* ToString(TradeMode v) {
+    switch (v) {
+    case TradeMode::CASH:
+        return "CASH";
+    case TradeMode::CROSS:
+        return "CROSS";
+    case TradeMode::ISOLATED:
+        return "ISOLATED";
     }
     std::unreachable();
 }
@@ -188,6 +201,7 @@ struct alignas(64) Signal {
     OrderType order_type;
     MarketType market_type;
     PosSide position_side;
+    TradeMode trade_mode;
     Price price;
     Volume volume;
 
@@ -209,6 +223,7 @@ struct alignas(64) ExecutionReport {
     Side side;
     MarketType market_type;
     PosSide position_side;
+    TradeMode trade_mode;
     Price price;
     Volume filled_volume;
     Volume total_volume;
@@ -238,6 +253,7 @@ struct OrderRequest {
     OrderType order_type;
     MarketType market_type;
     PosSide position_side;
+    TradeMode trade_mode;
     std::string size;
     std::string price;
     std::string target_currency;
