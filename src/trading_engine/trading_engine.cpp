@@ -31,6 +31,9 @@ void TradingEngine::Init() {
     position_manager_.InitSpotFromExchange(balances);
 
     client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
+    client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen) {
+        position_manager_.SyncSpotFromExchange(currency, available, frozen);
+    });
 
     std::thread listener_thread([this]() { RunOrderListener(); });
     listener_thread.detach();
