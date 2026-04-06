@@ -10,9 +10,7 @@ QuotationEngine::QuotationEngine(const SystemConfig& config, TickerRing* ticker_
       trade_ring_(trade_ring) {}
 
 void QuotationEngine::Run() {
-    if (!config_.quotation_engine.cpu_affinity.empty()) {
-        BindThreadToCpus(config_.quotation_engine.cpu_affinity);
-    }
+    BindThreadToCpus(config_.quotation_engine.cpu_affinity);
 
     INFO("Start quotation engine");
 

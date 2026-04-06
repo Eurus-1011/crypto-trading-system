@@ -10,8 +10,9 @@
 
 static std::string LockedCurrency(const char* instrument, Side side) {
     const char* dash = std::strchr(instrument, '-');
-    if (!dash)
+    if (!dash) {
         return instrument;
+    }
     return (side == Side::SELL) ? std::string(instrument, dash) : std::string(dash + 1);
 }
 
@@ -71,9 +72,7 @@ void TradingEngine::Init() {
 }
 
 void TradingEngine::Run() {
-    if (!config_.trading_engine.cpu_affinity.empty()) {
-        BindThreadToCpus(config_.trading_engine.cpu_affinity);
-    }
+    BindThreadToCpus(config_.trading_engine.cpu_affinity);
 
     RunOrderDispatcher();
     INFO("Stop trading engine");
