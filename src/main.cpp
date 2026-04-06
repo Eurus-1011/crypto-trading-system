@@ -9,21 +9,19 @@
 #include <csignal>
 #include <thread>
 
-static const std::string LOG_PATH = "logs/system.log";
-
-static QuotationEngine* g_quotation_engine = nullptr;
-static StrategyEngine* g_strategy_engine = nullptr;
-static TradingEngine* g_trading_engine = nullptr;
+static QuotationEngine* global_quotation_engine = nullptr;
+static StrategyEngine* global_strategy_engine = nullptr;
+static TradingEngine* global_trading_engine = nullptr;
 
 static void OnSignal(int) {
-    if (g_quotation_engine) {
-        g_quotation_engine->Stop();
+    if (global_quotation_engine) {
+        global_quotation_engine->Stop();
     }
-    if (g_strategy_engine) {
-        g_strategy_engine->Stop();
+    if (global_strategy_engine) {
+        global_strategy_engine->Stop();
     }
-    if (g_trading_engine) {
-        g_trading_engine->Stop();
+    if (global_trading_engine) {
+        global_trading_engine->Stop();
     }
 }
 
@@ -43,16 +41,15 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "Usage: crypto-trading-system <config_path>\n");
         return 1;
     }
-    std::string config_path = argv[1];
 
     SystemConfig config;
     std::string err;
-    if (!LoadConfig(config_path, config, err)) {
+    if (!LoadConfig(argv[1], config, err)) {
         std::fprintf(stderr, "Load config failed: %s\n", err.c_str());
         return 1;
     }
 
-    InitLog(LOG_PATH, config.logger.cpu_affinity);
+    InitLog(config.logger.cpu_affinity, config.logger.path);
 
     INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [INSTRUMENTS] " +
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +
@@ -75,9 +72,9 @@ int main(int argc, char* argv[]) {
     StrategyEngine strategy_engine(config, ticker_ring, bbo_ring, depth_ring, trade_ring, signal_ring, report_ring);
     TradingEngine trading_engine(config, signal_ring, report_ring);
 
-    g_quotation_engine = &quotation_engine;
-    g_strategy_engine = &strategy_engine;
-    g_trading_engine = &trading_engine;
+    global_quotation_engine = &quotation_engine;
+    global_strategy_engine = &strategy_engine;
+    global_trading_engine = &trading_engine;
 
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);

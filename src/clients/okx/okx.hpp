@@ -8,10 +8,16 @@
 #include <string_view>
 #include <unordered_map>
 
+static constexpr const char* OkxRestHost = "www.okx.com";
+static constexpr const char* OkxRestPort = "443";
 static constexpr const char* OkxWsHost = "ws.okx.com";
 static constexpr const char* OkxWsPort = "443";
 static constexpr const char* OkxPublicWsPath = "/ws/v5/public";
 static constexpr const char* OkxPrivateWsPath = "/ws/v5/private";
+static constexpr const char* OkxApiInstruments = "/api/v5/public/instruments";
+static constexpr const char* OkxApiOrdersPending = "/api/v5/trade/orders-pending";
+static constexpr const char* OkxApiBalance = "/api/v5/account/balance";
+static constexpr const char* OkxApiPositions = "/api/v5/account/positions";
 static constexpr const char* OkxChannelTickers = "tickers";
 static constexpr const char* OkxChannelBBO = "bbo-tbt";
 static constexpr const char* OkxChannelBooks5 = "books5";
@@ -105,7 +111,7 @@ class OkxClient : public ExchangeClient {
     std::vector<ExecutionReport> QuerySwapPendingOrders();
     std::map<std::string, std::pair<double, double>> QueryBalances();
     std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
-    void FetchInstrumentCodes(const std::vector<std::string>& instruments);
+    void FetchInstrumentInfo(const std::vector<std::string>& instruments);
 
   private:
     std::vector<ExecutionReport> QueryPendingOrdersByType(const std::string& inst_type);

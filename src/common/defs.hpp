@@ -5,7 +5,11 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <utility>
+
+using Price = int64_t;
+using Volume = int64_t;
 
 enum class MarketType : int8_t { SPOT, SWAP };
 enum class Side : int8_t { BUY, SELL };
@@ -99,20 +103,18 @@ inline MarketType DetectMarketType(const char* instrument) {
 static constexpr int MAX_DEPTH_LEVELS = 5;
 
 struct alignas(64) Ticker {
-    uint64_t exchange_ts_ms;
-    uint64_t local_ts_ns;
     char instrument[32];
     MarketType market_type;
-    double last_price;
-    double last_volume;
-    double bid_price;
-    double bid_volume;
-    double ask_price;
-    double ask_volume;
-    double open_24h;
-    double high_24h;
-    double low_24h;
-    double volume_24h;
+    Price last_price;
+    Volume last_volume;
+    Price bid_price;
+    Volume bid_volume;
+    Price ask_price;
+    Volume ask_volume;
+    Price open_24h;
+    Price high_24h;
+    Price low_24h;
+    Volume volume_24h;
     double volume_currency_24h;
 
     void SetInstrument(const char* src) {
@@ -122,14 +124,12 @@ struct alignas(64) Ticker {
 };
 
 struct alignas(64) BBO {
-    uint64_t exchange_ts_ms;
-    uint64_t local_ts_ns;
     char instrument[32];
     MarketType market_type;
-    double bid_price;
-    double bid_volume;
-    double ask_price;
-    double ask_volume;
+    Price bid_price;
+    Volume bid_volume;
+    Price ask_price;
+    Volume ask_volume;
 
     void SetInstrument(const char* src) {
         std::strncpy(instrument, src, sizeof(instrument) - 1);
@@ -138,14 +138,12 @@ struct alignas(64) BBO {
 };
 
 struct PriceLevel {
-    double price;
-    double volume;
+    Price price;
+    Volume volume;
     int order_count;
 };
 
 struct alignas(64) Depth {
-    uint64_t exchange_ts_ms;
-    uint64_t local_ts_ns;
     char instrument[32];
     MarketType market_type;
     int ask_levels;
@@ -160,14 +158,12 @@ struct alignas(64) Depth {
 };
 
 struct alignas(64) Trade {
-    uint64_t exchange_ts_ms;
-    uint64_t local_ts_ns;
     char instrument[32];
     char trade_id[32];
     MarketType market_type;
     Side side;
-    double price;
-    double volume;
+    Price price;
+    Volume volume;
 
     void SetInstrument(const char* src) {
         std::strncpy(instrument, src, sizeof(instrument) - 1);
@@ -186,15 +182,14 @@ using DepthRing = RingShm<Depth, 2048>;
 using TradeRing = RingShm<Trade, 8192>;
 
 struct alignas(64) Signal {
-    uint64_t timestamp_ns;
     char instrument[32];
     char order_id[32];
     Action action;
     OrderType order_type;
     MarketType market_type;
     PosSide position_side;
-    double price;
-    double volume;
+    Price price;
+    Volume volume;
 
     void SetInstrument(const char* src) {
         std::strncpy(instrument, src, sizeof(instrument) - 1);
@@ -208,16 +203,15 @@ struct alignas(64) Signal {
 };
 
 struct alignas(64) ExecutionReport {
-    uint64_t timestamp_ns;
     char instrument[32];
     char order_id[32];
     OrderStatus status;
     Side side;
     MarketType market_type;
     PosSide position_side;
-    double price;
-    double filled_volume;
-    double total_volume;
+    Price price;
+    Volume filled_volume;
+    Volume total_volume;
     double avg_fill_price;
     double fee;
     char fee_currency[16];
@@ -261,4 +255,38 @@ struct SwapPosition {
     double contracts = 0.0;
     double average_opening_price = 0.0;
     double unrealized_profit_loss = 0.0;
+};
+
+struct InstrumentInfo {
+    char instrument[32]{};
+    int price_precision = 0;
+    int volume_precision = 0;
+
+    void SetInstrument(const char* src) {
+        std::strncpy(instrument, src, sizeof(instrument) - 1);
+        instrument[sizeof(instrument) - 1] = '\0';
+    }
+};
+
+class InstrumentRegistry {
+  public:
+    static InstrumentRegistry& Instance() {
+        static InstrumentRegistry instance;
+        return instance;
+    }
+
+    void Add(const InstrumentInfo& info) { instruments_[info.instrument] = info; }
+
+    const InstrumentInfo* Find(const char* instrument) const {
+        auto it = instruments_.find(instrument);
+        return it != instruments_.end() ? &it->second : nullptr;
+    }
+
+    const InstrumentInfo& Get(const char* instrument) const { return instruments_.at(instrument); }
+
+    bool Empty() const { return instruments_.empty(); }
+
+  private:
+    InstrumentRegistry() = default;
+    std::unordered_map<std::string, InstrumentInfo> instruments_;
 };

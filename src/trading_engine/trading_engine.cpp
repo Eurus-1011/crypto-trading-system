@@ -2,6 +2,7 @@
 
 #include "common/cpu_affinity.hpp"
 #include "common/logger.hpp"
+#include "common/utils.hpp"
 
 #include <chrono>
 #include <immintrin.h>
@@ -24,7 +25,7 @@ void TradingEngine::Init() {
     client_->LoginPrivate();
     INFO("Login private ws success");
 
-    client_->FetchInstrumentCodes(config_.quotation_engine.instruments);
+    client_->FetchInstrumentInfo(config_.quotation_engine.instruments);
 
     auto balances = client_->QueryBalances();
     position_manager_.InitSpotFromExchange(balances);
@@ -96,9 +97,11 @@ void TradingEngine::RunOrderDispatcher() {
             request.order_type = signal.order_type;
             request.market_type = signal.market_type;
             request.position_side = signal.position_side;
-            request.size = std::to_string(signal.volume);
+
+            const auto& info = InstrumentRegistry::Instance().Get(signal.instrument);
+            request.size = Format(signal.volume, info.volume_precision);
             if (signal.order_type == OrderType::LIMIT) {
-                request.price = std::to_string(signal.price);
+                request.price = Format(signal.price, info.price_precision);
             }
 
             client_->SendPlaceOrder(request);
@@ -134,6 +137,8 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     std::string instrument = std::string(report.instrument);
     std::string side_str = ToString(report.side);
 
+    const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         if (report.market_type == MarketType::SWAP) {
             position_manager_.UpdateSwapOnFill(report);
@@ -142,11 +147,12 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         }
         if (report.status == OrderStatus::PARTIALLY_FILLED) {
             INFO("Order partially filled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " +
-                 side_str + ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [TOTAL_VOLUME] " +
-                 std::to_string(report.total_volume) + ", [AVG_PRICE] " + std::to_string(report.avg_fill_price));
+                 side_str + ", [FILLED_VOLUME] " + Format(report.filled_volume, info->volume_precision) +
+                 ", [TOTAL_VOLUME] " + Format(report.total_volume, info->volume_precision) + ", [AVG_PRICE] " +
+                 std::to_string(report.avg_fill_price));
         } else {
             INFO("Order filled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                 ", [FILLED_VOLUME] " + std::to_string(report.filled_volume) + ", [AVG_PRICE] " +
+                 ", [FILLED_VOLUME] " + Format(report.filled_volume, info->volume_precision) + ", [AVG_PRICE] " +
                  std::to_string(report.avg_fill_price));
         }
     } else if (report.status == OrderStatus::CANCELLED) {
@@ -155,7 +161,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
             INFO("Order cancelled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str);
         } else {
             position_manager_.UpdateSpotOnCancel(report);
-            double remaining = report.total_volume - report.filled_volume;
+            double remaining = Decode(report.total_volume - report.filled_volume, info->volume_precision);
             std::string currency = LockedCurrency(report.instrument, report.side);
             double available = position_manager_.GetSpotPosition(currency).available;
             INFO("Order cancelled: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
@@ -173,8 +179,9 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
             std::string currency = LockedCurrency(report.instrument, report.side);
             auto pos = position_manager_.GetSpotPosition(currency);
             INFO("Order new: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                 ", [PRICE] " + std::to_string(report.price) + ", [VOLUME] " + std::to_string(report.total_volume) +
-                 ", [AVAILABLE] " + std::to_string(pos.available) + ", [FROZEN] " + std::to_string(pos.frozen));
+                 ", [PRICE] " + Format(report.price, info->price_precision) + ", [VOLUME] " +
+                 Format(report.total_volume, info->volume_precision) + ", [AVAILABLE] " +
+                 std::to_string(pos.available) + ", [FROZEN] " + std::to_string(pos.frozen));
         } else {
             INFO("Order new: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str);
         }

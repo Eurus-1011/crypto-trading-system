@@ -1,6 +1,7 @@
 {
     "logger": {
-        "cpu_affinity":
+        "cpu_affinity": ,
+        "path": "
     },
     "exchange": {
         "name": "okx",

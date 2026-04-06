@@ -6,6 +6,7 @@
 
 struct LoggerConfig {
     int cpu_affinity;
+    std::string path;
 };
 
 struct ExchangeConfig {
@@ -90,6 +91,10 @@ inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& 
         int64_t cpu_val;
         if (!logger["cpu_affinity"].get(cpu_val)) {
             out.logger.cpu_affinity = static_cast<int>(cpu_val);
+        }
+        std::string_view path_val;
+        if (!logger["path"].get(path_val)) {
+            out.logger.path = std::string(path_val);
         }
     }
 

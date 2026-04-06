@@ -51,7 +51,7 @@ class PositionManager {
     mutable std::mutex mutex_;
     std::unordered_map<std::string, SpotPosition> spot_positions_;
     std::map<std::pair<std::string, PosSide>, SwapPosition> swap_positions_;
-    std::unordered_map<std::string, double> spot_order_fill_tracker_;
-    std::unordered_map<std::string, double> swap_order_fill_tracker_;
+    std::unordered_map<std::string, Volume> spot_order_fill_tracker_;
+    std::unordered_map<std::string, Volume> swap_order_fill_tracker_;
     std::unordered_map<std::string, double> spot_reserved_;
 };

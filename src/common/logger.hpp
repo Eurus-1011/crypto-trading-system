@@ -9,7 +9,7 @@
 
 inline std::atomic<quill::Logger*> global_logger_ptr{nullptr};
 
-inline void InitLog(const std::string& path, int cpu_affinity) {
+inline void InitLog(const int cpu_affinity, const std::string& path) {
     quill::BackendOptions backend_options;
     backend_options.thread_name = "LoggerBackend";
     backend_options.log_level_descriptions[static_cast<uint32_t>(quill::LogLevel::Warning)] = "WARN";

@@ -26,10 +26,10 @@ class Strategy {
     void Stop() { running_ = false; }
 
   protected:
-    void EmitBuy(const char* instrument, OrderType order_type, double price, double volume, MarketType market_type,
+    void EmitBuy(const char* instrument, OrderType order_type, Price price, Volume volume, MarketType market_type,
                  PosSide position_side);
 
-    void EmitSell(const char* instrument, OrderType order_type, double price, double volume, MarketType market_type,
+    void EmitSell(const char* instrument, OrderType order_type, Price price, Volume volume, MarketType market_type,
                   PosSide position_side);
 
     void EmitCancel(const char* instrument, const char* order_id, MarketType market_type);

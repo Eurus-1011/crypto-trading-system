@@ -1,6 +1,7 @@
 #include "position_manager.hpp"
 
 #include "common/logger.hpp"
+#include "common/utils.hpp"
 
 #include <cmath>
 
@@ -55,11 +56,13 @@ double PositionManager::GetEffectiveAvailableSpot(const std::string& currency) c
 
 void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
     std::lock_guard<std::mutex> lock(mutex_);
+    const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
     if (report.side == Side::BUY) {
         std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
         auto& quote_position = spot_positions_[quote_currency];
         quote_position.currency = quote_currency;
-        double freeze_amount = report.price * report.total_volume;
+        double freeze_amount =
+            Decode(report.price, info.price_precision) * Decode(report.total_volume, info.volume_precision);
         spot_reserved_[quote_currency] = std::max(0.0, spot_reserved_[quote_currency] - freeze_amount);
         quote_position.available -= freeze_amount;
         quote_position.frozen += freeze_amount;
@@ -67,7 +70,7 @@ void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
         std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_position = spot_positions_[base_currency];
         base_position.currency = base_currency;
-        double freeze_amount = report.total_volume;
+        double freeze_amount = Decode(report.total_volume, info.volume_precision);
         spot_reserved_[base_currency] = std::max(0.0, spot_reserved_[base_currency] - freeze_amount);
         base_position.available -= freeze_amount;
         base_position.frozen += freeze_amount;
@@ -82,15 +85,18 @@ void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         std::string order_id = std::string(report.order_id);
         auto& tracker = spot_order_fill_tracker_[order_id];
-        double incremental = report.filled_volume - tracker;
+        Volume incremental_scaled = report.filled_volume - tracker;
         if (report.status == OrderStatus::FILLED) {
             spot_order_fill_tracker_.erase(order_id);
         } else {
             tracker = report.filled_volume;
         }
-        if (incremental < 1e-8) {
+        if (incremental_scaled <= 0) {
             return;
         }
+
+        const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+        double incremental = Decode(incremental_scaled, info.volume_precision);
 
         auto& base_position = spot_positions_[base_currency];
         auto& quote_position = spot_positions_[quote_currency];
@@ -121,19 +127,22 @@ void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
 void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (report.status == OrderStatus::CANCELLED) {
-        double remaining = report.total_volume - report.filled_volume;
-        if (remaining > 1e-8) {
+        Volume remaining_scaled = report.total_volume - report.filled_volume;
+        if (remaining_scaled > 0) {
+            const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
             if (report.side == Side::BUY) {
                 std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
                 auto& quote_position = spot_positions_[quote_currency];
                 quote_position.currency = quote_currency;
-                double release_amount = remaining * report.price;
+                double release_amount =
+                    Decode(remaining_scaled, info.volume_precision) * Decode(report.price, info.price_precision);
                 quote_position.frozen -= release_amount;
                 quote_position.available += release_amount;
             } else {
                 std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
                 auto& base_position = spot_positions_[base_currency];
                 base_position.currency = base_currency;
+                double remaining = Decode(remaining_scaled, info.volume_precision);
                 base_position.frozen -= remaining;
                 base_position.available += remaining;
             }
@@ -147,35 +156,41 @@ void PositionManager::UpdateSpotOnRejected(const ExecutionReport& report) {
     std::string instrument = std::string(report.instrument);
     std::string side_str = ToString(report.side);
 
+    const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+
     std::lock_guard<std::mutex> lock(mutex_);
     if (report.side == Side::SELL) {
         std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_position = spot_positions_[base_currency];
-        if (base_position.frozen >= report.total_volume - 1e-8) {
-            base_position.frozen -= report.total_volume;
-            base_position.available += report.total_volume;
+        double total_volume = Decode(report.total_volume, info.volume_precision);
+        if (base_position.frozen >= total_volume - 1e-8) {
+            base_position.frozen -= total_volume;
+            base_position.available += total_volume;
             ERROR("Order rejected: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                  ", [RELEASED_FROZEN] " + std::to_string(report.total_volume) + ", [AVAILABLE] " +
+                  ", [RELEASED_FROZEN] " + Format(report.total_volume, info.volume_precision) + ", [AVAILABLE] " +
                   std::to_string(base_position.available));
         } else {
-            spot_reserved_[base_currency] = std::max(0.0, spot_reserved_[base_currency] - report.total_volume);
+            spot_reserved_[base_currency] = std::max(0.0, spot_reserved_[base_currency] - total_volume);
             ERROR("Order rejected: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                  ", [RELEASED_RESERVED] " + std::to_string(report.total_volume));
+                  ", [RELEASED_RESERVED] " + Format(report.total_volume, info.volume_precision));
         }
     } else if (report.side == Side::BUY) {
         std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
         auto& quote_position = spot_positions_[quote_currency];
-        double release_amount = report.price * report.total_volume;
+        double release_amount =
+            Decode(report.price, info.price_precision) * Decode(report.total_volume, info.volume_precision);
         if (quote_position.frozen >= release_amount - 1e-8) {
             quote_position.frozen -= release_amount;
             quote_position.available += release_amount;
             ERROR("Order rejected: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                  ", [RELEASED_FROZEN] " + std::to_string(release_amount) + ", [AVAILABLE] " +
+                  ", [RELEASED_FROZEN] " + Format(report.price, info.price_precision) + "*" +
+                  Format(report.total_volume, info.volume_precision) + ", [AVAILABLE] " +
                   std::to_string(quote_position.available));
         } else {
             spot_reserved_[quote_currency] = std::max(0.0, spot_reserved_[quote_currency] - release_amount);
             ERROR("Order rejected: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " + side_str +
-                  ", [RELEASED_RESERVED] " + std::to_string(release_amount));
+                  ", [RELEASED_RESERVED] " + Format(report.price, info.price_precision) + "*" +
+                  Format(report.total_volume, info.volume_precision));
         }
     }
 }
@@ -230,15 +245,18 @@ void PositionManager::UpdateSwapOnFill(const ExecutionReport& report) {
 
     std::string order_id = std::string(report.order_id);
     auto& tracker = swap_order_fill_tracker_[order_id];
-    double incremental = report.filled_volume - tracker;
+    Volume incremental_scaled = report.filled_volume - tracker;
     if (report.status == OrderStatus::FILLED) {
         swap_order_fill_tracker_.erase(order_id);
     } else {
         tracker = report.filled_volume;
     }
-    if (incremental < 1e-8) {
+    if (incremental_scaled <= 0) {
         return;
     }
+
+    const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+    double incremental = Decode(incremental_scaled, info.volume_precision);
 
     bool is_opening = false;
     switch (report.position_side) {
@@ -264,7 +282,7 @@ void PositionManager::UpdateSwapOnFill(const ExecutionReport& report) {
 
     INFO("Update swap position on fill: [INSTRUMENT] " + instrument + ", [POSITION_SIDE] " +
          ToString(report.position_side) + ", [SIDE] " + ToString(report.side) + ", [FILLED_VOLUME] " +
-         std::to_string(report.filled_volume) + ", [CONTRACTS] " + std::to_string(position.contracts));
+         Format(report.filled_volume, info.volume_precision) + ", [CONTRACTS] " + std::to_string(position.contracts));
 }
 
 void PositionManager::UpdateSwapOnCancel(const ExecutionReport& report) {
