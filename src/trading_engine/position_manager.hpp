@@ -4,24 +4,29 @@
 
 #include <map>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 
 struct SpotPosition {
     std::string currency;
     double available = 0.0;
     double frozen = 0.0;
+    double borrowed = 0.0;
 };
 
 class PositionManager {
   public:
-    void InitSpotFromExchange(const std::map<std::string, std::pair<double, double>>& balances);
-    void SyncSpotFromExchange(const std::string& currency, double exchange_available, double exchange_frozen);
+    void InitSpotFromExchange(const std::map<std::string, std::tuple<double, double, double>>& balances);
+    void SyncSpotFromExchange(const std::string& currency, double exchange_available, double exchange_frozen,
+                              double exchange_borrowed);
     void ReserveSpot(const std::string& currency, double amount);
     double GetEffectiveAvailableSpot(const std::string& currency) const;
-    void UpdateSpotOnNew(const ExecutionReport& report);
-    void UpdateSpotOnFill(const ExecutionReport& report);
-    void UpdateSpotOnCancel(const ExecutionReport& report);
-    void UpdateSpotOnRejected(const ExecutionReport& report);
+    double GetBorrowed(const std::string& currency) const;
+    bool CanBorrowMore(const std::string& currency, double amount, double max_borrow) const;
+    void UpdateSpotOnNew(const ExecutionReport& report, TradeMode trade_mode);
+    void UpdateSpotOnFill(const ExecutionReport& report, TradeMode trade_mode);
+    void UpdateSpotOnCancel(const ExecutionReport& report, TradeMode trade_mode);
+    void UpdateSpotOnRejected(const ExecutionReport& report, TradeMode trade_mode);
     SpotPosition GetSpotPosition(const std::string& currency) const;
 
     void InitSwapFromExchange(const std::map<std::string, std::map<PosSide, SwapPosition>>& positions);

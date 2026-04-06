@@ -38,9 +38,10 @@ inline const std::unordered_map<OrderType, const char*> kOkxOrderType = {
     {OrderType::MARKET, "market"},
     {OrderType::LIMIT, "limit"},
 };
-inline const std::unordered_map<MarketType, const char*> kOkxTdMode = {
-    {MarketType::SPOT, "cash"},
-    {MarketType::SWAP, "cross"},
+inline const std::unordered_map<TradeMode, const char*> kOkxTradeMode = {
+    {TradeMode::CASH, "cash"},
+    {TradeMode::CROSS, "cross"},
+    {TradeMode::ISOLATED, "isolated"},
 };
 inline const std::unordered_map<MarketType, const char*> kOkxInstType = {
     {MarketType::SPOT, "SPOT"},
@@ -66,6 +67,11 @@ inline const std::unordered_map<std::string_view, OrderStatus> kOkxOrderStateEnu
     {"canceled", OrderStatus::CANCELLED},
     {"live", OrderStatus::NEW},
 };
+inline const std::unordered_map<std::string_view, TradeMode> kOkxTradeModeEnum = {
+    {"cash", TradeMode::CASH},
+    {"cross", TradeMode::CROSS},
+    {"isolated", TradeMode::ISOLATED},
+};
 
 inline Side OkxParseSide(std::string_view s) {
     auto it = kOkxSideEnum.find(s);
@@ -82,6 +88,10 @@ inline MarketType OkxParseInstType(std::string_view s) {
 inline OrderStatus OkxParseOrderState(std::string_view s) {
     auto it = kOkxOrderStateEnum.find(s);
     return it != kOkxOrderStateEnum.end() ? it->second : OrderStatus::REJECTED;
+}
+inline TradeMode OkxParseTradeMode(std::string_view s) {
+    auto it = kOkxTradeModeEnum.find(s);
+    return it != kOkxTradeModeEnum.end() ? it->second : TradeMode::CASH;
 }
 
 class OkxClient : public ExchangeClient {
@@ -109,7 +119,7 @@ class OkxClient : public ExchangeClient {
   public:
     std::vector<ExecutionReport> QuerySpotPendingOrders();
     std::vector<ExecutionReport> QuerySwapPendingOrders();
-    std::map<std::string, std::pair<double, double>> QueryBalances();
+    std::map<std::string, std::tuple<double, double, double>> QueryBalances();
     std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
     void FetchInstrumentInfo(const std::vector<std::string>& instruments);
 

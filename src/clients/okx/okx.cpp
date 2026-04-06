@@ -80,7 +80,7 @@ std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
     msg += R"(","sz":")";
     msg += req.size;
     msg += R"(","tdMode":")";
-    msg += kOkxTdMode.at(req.market_type);
+    msg += kOkxTradeMode.at(req.trade_mode);
     msg += '"';
 
     if (req.market_type == MarketType::SWAP) {
@@ -190,8 +190,8 @@ void OkxClient::FetchInstrumentInfo(const std::vector<std::string>& instruments)
             InstrumentRegistry::Instance().Add(info);
 
             INFO("Fetch instrument info: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code_val) +
-                 ", [PRICE_PRECISION] " + std::to_string(info.price_precision) +
-                 ", [VOLUME_PRECISION] " + std::to_string(info.volume_precision));
+                 ", [PRICE_PRECISION] " + std::to_string(info.price_precision) + ", [VOLUME_PRECISION] " +
+                 std::to_string(info.volume_precision));
             break;
         }
     }
@@ -265,12 +265,13 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
                 break;
             }
 
-            std::string_view inst_id, order_id, state, side, pos_side;
+            std::string_view inst_id, order_id, state, side, pos_side, trade_mode;
             (void)order_element["instId"].get(inst_id);
             (void)order_element["ordId"].get(order_id);
             (void)order_element["state"].get(state);
             (void)order_element["side"].get(side);
             (void)order_element["posSide"].get(pos_side);
+            (void)order_element["tdMode"].get(trade_mode);
 
             std::string order_id_str(order_id);
 
@@ -281,6 +282,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             report.side = OkxParseSide(side.empty() ? "buy" : side);
             report.market_type = market_type;
             report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+            report.trade_mode = OkxParseTradeMode(trade_mode.empty() ? "cash" : trade_mode);
 
             const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
             double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
@@ -317,7 +319,7 @@ std::vector<ExecutionReport> OkxClient::QuerySwapPendingOrders() {
     return result;
 }
 
-std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
+std::map<std::string, std::tuple<double, double, double>> OkxClient::QueryBalances() {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
@@ -336,7 +338,7 @@ std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
                           config_.passphrase + "\r\n";
 
     std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
-    std::map<std::string, std::pair<double, double>> result;
+    std::map<std::string, std::tuple<double, double, double>> result;
     if (raw_body.empty()) {
         return result;
     }
@@ -383,11 +385,15 @@ std::map<std::string, std::pair<double, double>> OkxClient::QueryBalances() {
             if (detail["ccy"].get(currency) || currency.empty()) {
                 continue;
             }
-            double available = 0.0, frozen = 0.0;
+            double available = 0.0, frozen = 0.0, borrowed = 0.0;
             (void)detail["availBal"].get_double_in_string().get(available);
             (void)detail["frozenBal"].get_double_in_string().get(frozen);
-            if (available > 0 || frozen > 0) {
-                result[std::string(currency)] = {available, frozen};
+            (void)detail["liab"].get_double_in_string().get(borrowed);
+            if (borrowed < 0.0) {
+                borrowed = -borrowed;
+            }
+            if (available > 0 || frozen > 0 || borrowed > 0) {
+                result[std::string(currency)] = {available, frozen, borrowed};
             }
         }
         break;
@@ -608,13 +614,14 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
 }
 
 void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
-    std::string_view inst_id, order_id, state, side, pos_side, fee_currency;
+    std::string_view inst_id, order_id, state, side, pos_side, fee_currency, trade_mode;
     (void)data["instId"].get(inst_id);
     (void)data["ordId"].get(order_id);
     (void)data["state"].get(state);
     (void)data["side"].get(side);
     (void)data["posSide"].get(pos_side);
     (void)data["feeCcy"].get(fee_currency);
+    (void)data["tdMode"].get(trade_mode);
 
     std::string inst_id_str(inst_id);
 
@@ -625,6 +632,7 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     report.side = OkxParseSide(side.empty() ? "buy" : side);
     report.market_type = DetectMarketType(inst_id_str.c_str());
     report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+    report.trade_mode = OkxParseTradeMode(trade_mode.empty() ? "cash" : trade_mode);
 
     const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
     double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
@@ -843,9 +851,13 @@ void OkxClient::DecodeAccountUpdate(simdjson::ondemand::value data) {
         if (detail["ccy"].get(currency) || currency.empty()) {
             continue;
         }
-        double available = 0.0, frozen = 0.0;
+        double available = 0.0, frozen = 0.0, borrowed = 0.0;
         (void)detail["availBal"].get_double_in_string().get(available);
         (void)detail["frozenBal"].get_double_in_string().get(frozen);
-        on_balance_update_(std::string(currency), available, frozen);
+        (void)detail["liab"].get_double_in_string().get(borrowed);
+        if (borrowed < 0.0) {
+            borrowed = -borrowed;
+        }
+        on_balance_update_(std::string(currency), available, frozen, borrowed);
     }
 }

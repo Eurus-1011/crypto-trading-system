@@ -17,7 +17,9 @@ static constexpr int64_t kPow10[] = {
     10'000'000LL, 100'000'000LL, 1'000'000'000LL, 10'000'000'000LL, 100'000'000'000LL, 1'000'000'000'000LL,
 };
 
-inline int64_t Encode(double value, int precision) { return static_cast<int64_t>(std::round(value * kPow10[precision])); }
+inline int64_t Encode(double value, int precision) {
+    return static_cast<int64_t>(std::round(value * kPow10[precision]));
+}
 
 inline double Decode(int64_t scaled, int precision) { return static_cast<double>(scaled) / kPow10[precision]; }
 

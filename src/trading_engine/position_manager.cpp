@@ -5,37 +5,42 @@
 
 #include <cmath>
 
-void PositionManager::InitSpotFromExchange(const std::map<std::string, std::pair<double, double>>& balances) {
+void PositionManager::InitSpotFromExchange(const std::map<std::string, std::tuple<double, double, double>>& balances) {
     std::lock_guard<std::mutex> lock(mutex_);
     spot_positions_.clear();
     spot_reserved_.clear();
     for (const auto& [currency, balance] : balances) {
         SpotPosition position;
         position.currency = currency;
-        position.available = balance.first;
-        position.frozen = balance.second;
+        position.available = std::get<0>(balance);
+        position.frozen = std::get<1>(balance);
+        position.borrowed = std::get<2>(balance);
         spot_positions_[currency] = position;
         INFO("Init spot position: [CURRENCY] " + currency + ", [AVAILABLE] " + std::to_string(position.available) +
-             ", [TOTAL_FROZEN] " + std::to_string(position.frozen));
+             ", [TOTAL_FROZEN] " + std::to_string(position.frozen) + ", [BORROWED] " +
+             std::to_string(position.borrowed));
     }
 }
 
 void PositionManager::SyncSpotFromExchange(const std::string& currency, double exchange_available,
-                                           double exchange_frozen) {
+                                           double exchange_frozen, double exchange_borrowed) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto& position = spot_positions_[currency];
     position.currency = currency;
 
     double available_diff = std::abs(position.available - exchange_available);
     double frozen_diff = std::abs(position.frozen - exchange_frozen);
+    double borrowed_diff = std::abs(position.borrowed - exchange_borrowed);
 
-    if (available_diff > 1e-8 || frozen_diff > 1e-8) {
+    if (available_diff > 1e-8 || frozen_diff > 1e-8 || borrowed_diff > 1e-8) {
         WARN("Spot position mismatch: [CURRENCY] " + currency + ", [LOCAL_AVAILABLE] " +
              std::to_string(position.available) + ", [EXCHANGE_AVAILABLE] " + std::to_string(exchange_available) +
              ", [LOCAL_FROZEN] " + std::to_string(position.frozen) + ", [EXCHANGE_FROZEN] " +
-             std::to_string(exchange_frozen));
+             std::to_string(exchange_frozen) + ", [LOCAL_BORROWED] " + std::to_string(position.borrowed) +
+             ", [EXCHANGE_BORROWED] " + std::to_string(exchange_borrowed));
         position.available = exchange_available;
         position.frozen = exchange_frozen;
+        position.borrowed = exchange_borrowed;
         spot_reserved_[currency] = 0.0;
     }
 }
@@ -54,7 +59,23 @@ double PositionManager::GetEffectiveAvailableSpot(const std::string& currency) c
     return available - reserved;
 }
 
-void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
+double PositionManager::GetBorrowed(const std::string& currency) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = spot_positions_.find(currency);
+    return (it != spot_positions_.end()) ? it->second.borrowed : 0.0;
+}
+
+bool PositionManager::CanBorrowMore(const std::string& currency, double amount, double max_borrow) const {
+    if (max_borrow <= 0.0) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = spot_positions_.find(currency);
+    double current_borrowed = (it != spot_positions_.end()) ? it->second.borrowed : 0.0;
+    return current_borrowed + amount <= max_borrow;
+}
+
+void PositionManager::UpdateSpotOnNew(const ExecutionReport& report, TradeMode trade_mode) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
     if (report.side == Side::BUY) {
@@ -66,7 +87,7 @@ void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
         spot_reserved_[quote_currency] = std::max(0.0, spot_reserved_[quote_currency] - freeze_amount);
         quote_position.available -= freeze_amount;
         quote_position.frozen += freeze_amount;
-    } else {
+    } else if (trade_mode == TradeMode::CASH) {
         std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_position = spot_positions_[base_currency];
         base_position.currency = base_currency;
@@ -77,7 +98,7 @@ void PositionManager::UpdateSpotOnNew(const ExecutionReport& report) {
     }
 }
 
-void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
+void PositionManager::UpdateSpotOnFill(const ExecutionReport& report, TradeMode trade_mode) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
     std::string quote_currency = ExtractCurrency<CurrencyPart::Quote>(report.instrument);
@@ -113,7 +134,9 @@ void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
                 quote_position.available += report.fee;
             }
         } else {
-            base_position.frozen -= incremental;
+            if (trade_mode == TradeMode::CASH) {
+                base_position.frozen -= incremental;
+            }
             quote_position.available += report.avg_fill_price * incremental;
             if (fee_currency == quote_currency) {
                 quote_position.available += report.fee;
@@ -124,7 +147,7 @@ void PositionManager::UpdateSpotOnFill(const ExecutionReport& report) {
     }
 }
 
-void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report) {
+void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report, TradeMode trade_mode) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (report.status == OrderStatus::CANCELLED) {
         Volume remaining_scaled = report.total_volume - report.filled_volume;
@@ -138,7 +161,7 @@ void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report) {
                     Decode(remaining_scaled, info.volume_precision) * Decode(report.price, info.price_precision);
                 quote_position.frozen -= release_amount;
                 quote_position.available += release_amount;
-            } else {
+            } else if (trade_mode == TradeMode::CASH) {
                 std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
                 auto& base_position = spot_positions_[base_currency];
                 base_position.currency = base_currency;
@@ -151,7 +174,7 @@ void PositionManager::UpdateSpotOnCancel(const ExecutionReport& report) {
     }
 }
 
-void PositionManager::UpdateSpotOnRejected(const ExecutionReport& report) {
+void PositionManager::UpdateSpotOnRejected(const ExecutionReport& report, TradeMode trade_mode) {
     std::string order_id = std::string(report.order_id);
     std::string instrument = std::string(report.instrument);
     std::string side_str = ToString(report.side);
@@ -159,6 +182,11 @@ void PositionManager::UpdateSpotOnRejected(const ExecutionReport& report) {
     const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
 
     std::lock_guard<std::mutex> lock(mutex_);
+    if (report.side == Side::SELL && trade_mode != TradeMode::CASH) {
+        ERROR("Margin order rejected: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [SIDE] " +
+              side_str);
+        return;
+    }
     if (report.side == Side::SELL) {
         std::string base_currency = ExtractCurrency<CurrencyPart::Base>(report.instrument);
         auto& base_position = spot_positions_[base_currency];

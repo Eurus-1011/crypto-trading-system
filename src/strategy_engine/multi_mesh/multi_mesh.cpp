@@ -236,8 +236,9 @@ void MultiMeshStrategy::OnBBO(const BBO& bbo) {
     }
 
     Price mid_scaled = (bbo.bid_price + bbo.ask_price) / 2;
-    mesh->center_grid_idx = std::clamp(
-        static_cast<int>((mid_scaled - mesh->lower_price + mesh->grid_step / 2) / mesh->grid_step), 0, mesh->grid_count);
+    mesh->center_grid_idx =
+        std::clamp(static_cast<int>((mid_scaled - mesh->lower_price + mesh->grid_step / 2) / mesh->grid_step), 0,
+                   mesh->grid_count);
 
     INFO("First BBO: [INSTRUMENT] " + mesh->instrument + ", [MID_PRICE] " + Format(mid_scaled, mesh->price_precision) +
          ", [CENTER_PRICE] " + Format(mesh->grids[mesh->center_grid_idx].price, mesh->price_precision));
@@ -443,8 +444,8 @@ void MultiMeshStrategy::PlaceBuyAtGrid(MeshConfig* mesh, int grid_index) {
 
     grid.state = GridState::BUY_PENDING;
     grid.order_id.clear();
-    EmitBuy(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
-            mesh->position_side);
+    EmitBuy(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type, mesh->position_side,
+            TradeMode::CASH);
 
     INFO("Place order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] BUY, [PRICE] " +
          Format(grid.price, mesh->price_precision) + ", [VOLUME] " + Format(grid.volume, mesh->volume_precision) +
@@ -475,7 +476,7 @@ void MultiMeshStrategy::PlaceSellAtGrid(MeshConfig* mesh, int grid_index) {
     grid.state = GridState::SELL_PENDING;
     grid.order_id.clear();
     EmitSell(mesh->instrument.c_str(), OrderType::LIMIT, grid.price, grid.volume, mesh->market_type,
-             mesh->position_side);
+             mesh->position_side, TradeMode::CASH);
 
     INFO("Place order: [INSTRUMENT] " + mesh->instrument + ", [SIDE] SELL, [PRICE] " +
          Format(grid.price, mesh->price_precision) + ", [VOLUME] " + Format(grid.volume, mesh->volume_precision) +
