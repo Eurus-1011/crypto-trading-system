@@ -284,14 +284,19 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
             report.trade_mode = OkxParseTradeMode(trade_mode.empty() ? "cash" : trade_mode);
 
-            const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+            const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+            if (!info) {
+                WARN("Skip pending order for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
+                continue;
+            }
+
             double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
             (void)order_element["px"].get_double_in_string().get(px_value);
             (void)order_element["accFillSz"].get_double_in_string().get(acc_fill_sz_value);
             (void)order_element["sz"].get_double_in_string().get(sz_value);
-            report.price = Encode(px_value, info.price_precision);
-            report.filled_volume = Encode(acc_fill_sz_value, info.volume_precision);
-            report.total_volume = Encode(sz_value, info.volume_precision);
+            report.price = Encode(px_value, info->price_precision);
+            report.filled_volume = Encode(acc_fill_sz_value, info->volume_precision);
+            report.total_volume = Encode(sz_value, info->volume_precision);
             (void)order_element["avgPx"].get_double_in_string().get(report.avg_fill_price);
             result.push_back(report);
 
@@ -634,14 +639,19 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
     report.trade_mode = OkxParseTradeMode(trade_mode.empty() ? "cash" : trade_mode);
 
-    const auto& info = InstrumentRegistry::Instance().Get(report.instrument);
+    const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+    if (!info) {
+        WARN("Skip order update for unregistered instrument: [INSTRUMENT] " + inst_id_str);
+        return;
+    }
+    
     double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
     (void)data["px"].get_double_in_string().get(px_value);
     (void)data["accFillSz"].get_double_in_string().get(acc_fill_sz_value);
     (void)data["sz"].get_double_in_string().get(sz_value);
-    report.price = Encode(px_value, info.price_precision);
-    report.filled_volume = Encode(acc_fill_sz_value, info.volume_precision);
-    report.total_volume = Encode(sz_value, info.volume_precision);
+    report.price = Encode(px_value, info->price_precision);
+    report.filled_volume = Encode(acc_fill_sz_value, info->volume_precision);
+    report.total_volume = Encode(sz_value, info->volume_precision);
     (void)data["avgPx"].get_double_in_string().get(report.avg_fill_price);
     (void)data["fillFee"].get_double_in_string().get(report.fee);
     report.SetFeeCurrency(std::string(fee_currency).c_str());
