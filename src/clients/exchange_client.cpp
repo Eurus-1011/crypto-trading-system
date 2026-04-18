@@ -97,15 +97,26 @@ void ExchangeClient::Start() {
             }
         }
 
+        bool ping_pending = false;
         while (running_) {
             std::string raw;
-            if (!public_ws_.ReadWithTimeout(raw, 15)) {
+            if (!public_ws_.ReadWithTimeout(raw, 5)) {
+                WARN("Public ws read failed, will reconnect");
                 break;
             }
             if (raw.empty()) {
-                public_ws_.Send("ping");
+                if (ping_pending) {
+                    WARN("Public ws pong timeout, will reconnect");
+                    break;
+                }
+                if (!public_ws_.Send("ping")) {
+                    WARN("Public ws ping send failed, will reconnect");
+                    break;
+                }
+                ping_pending = true;
                 continue;
             }
+            ping_pending = false;
             if (raw == "pong") {
                 continue;
             }
@@ -149,27 +160,44 @@ void ExchangeClient::LoginPrivate() {
 
 void ExchangeClient::StartPrivateListener() {
     while (running_) {
-        std::string raw;
-        if (!private_ws_.ReadWithTimeout(raw, 15)) {
-            if (!running_) {
+        bool ping_pending = false;
+        bool need_reconnect = false;
+        while (running_ && !need_reconnect) {
+            std::string raw;
+            if (!private_ws_.ReadWithTimeout(raw, 5)) {
+                WARN("Private ws read failed, will reconnect");
+                need_reconnect = true;
                 break;
             }
-
-            std::this_thread::sleep_for(std::chrono::seconds(3));
-            if (!ReconnectPrivate()) {
-                WARN("Private ws reconnect failed, retry in 5s");
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+            if (raw.empty()) {
+                if (ping_pending) {
+                    WARN("Private ws pong timeout, will reconnect");
+                    need_reconnect = true;
+                    break;
+                }
+                if (!private_ws_.Send("ping")) {
+                    WARN("Private ws ping send failed, will reconnect");
+                    need_reconnect = true;
+                    break;
+                }
+                ping_pending = true;
+                continue;
             }
-            continue;
+            ping_pending = false;
+            if (raw == "pong") {
+                continue;
+            }
+            OnPrivateMessage(raw);
         }
-        if (raw.empty()) {
-            private_ws_.Send("ping");
-            continue;
+
+        if (!running_) {
+            break;
         }
-        if (raw == "pong") {
-            continue;
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        if (!ReconnectPrivate()) {
+            WARN("Private ws reconnect failed, retry in 5s");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
-        OnPrivateMessage(raw);
     }
 }
 

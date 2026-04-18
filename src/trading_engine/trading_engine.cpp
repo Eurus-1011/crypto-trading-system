@@ -7,6 +7,7 @@
 #include <chrono>
 #include <immintrin.h>
 #include <thread>
+#include <unordered_set>
 
 static std::string LockedCurrency(const char* instrument, Side side) {
     const char* dash = std::strchr(instrument, '-');
@@ -49,6 +50,7 @@ void TradingEngine::Init() {
     INFO("Subscribe account channel success");
 
     pending_orders_ = client_->QuerySpotPendingOrders();
+    INFO("Query spot pending orders complete: [COUNT] " + std::to_string(pending_orders_.size()));
 
     bool has_swap = false;
     for (const auto& instrument : config_.quotation_engine.instruments) {
@@ -65,7 +67,15 @@ void TradingEngine::Init() {
         position_manager_.InitSwapFromExchange(swap_positions);
 
         auto swap_pending = client_->QuerySwapPendingOrders();
+        INFO("Query swap pending orders complete: [COUNT] " + std::to_string(swap_pending.size()));
         pending_orders_.insert(pending_orders_.end(), swap_pending.begin(), swap_pending.end());
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(live_orders_mutex_);
+        for (const auto& order : pending_orders_) {
+            live_order_instruments_[order.order_id] = order.instrument;
+        }
     }
 
     INFO("Trading engine init complete");
@@ -116,22 +126,82 @@ void TradingEngine::RunOrderListener() { client_->StartPrivateListener(); }
 
 void TradingEngine::RunReconciler() {
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::minutes(5));
+        std::this_thread::sleep_for(std::chrono::seconds(30));
         if (!running_)
             break;
 
-        auto balances = client_->QueryBalances();
-        for (const auto& [currency, balance] : balances) {
-            position_manager_.SyncSpotFromExchange(currency, std::get<0>(balance), std::get<1>(balance),
-                                                   std::get<2>(balance));
-        }
+        ReconcileOrders();
+        ReconcileBalances();
+        ReconcileSwapPositions();
+    }
+}
 
-        auto swap_positions = client_->QuerySwapPositions();
-        for (const auto& [instrument, side_map] : swap_positions) {
-            for (const auto& [position_side, swap_position] : side_map) {
-                position_manager_.SyncSwapFromExchange(instrument, position_side, swap_position.contracts,
-                                                       swap_position.average_opening_price);
+void TradingEngine::ReconcileOrders() {
+    auto remote_spot = client_->QuerySpotPendingOrders();
+    std::unordered_set<std::string> remote_active;
+    for (const auto& order : remote_spot) {
+        remote_active.insert(order.order_id);
+    }
+
+    bool has_swap = false;
+    for (const auto& instrument : config_.quotation_engine.instruments) {
+        if (DetectMarketType(instrument.c_str()) == MarketType::SWAP) {
+            has_swap = true;
+            break;
+        }
+    }
+    if (has_swap) {
+        auto remote_swap = client_->QuerySwapPendingOrders();
+        for (const auto& order : remote_swap) {
+            remote_active.insert(order.order_id);
+        }
+    }
+
+    std::vector<std::pair<std::string, std::string>> orphans;
+    {
+        std::lock_guard<std::mutex> lock(live_orders_mutex_);
+        for (const auto& [id, instrument] : live_order_instruments_) {
+            if (!remote_active.contains(id)) {
+                orphans.emplace_back(id, instrument);
             }
+        }
+    }
+    if (orphans.empty()) {
+        return;
+    }
+
+    INFO("Reconcile orders: [ORPHAN_COUNT] " + std::to_string(orphans.size()));
+
+    for (const auto& [id, instrument] : orphans) {
+        ExecutionReport report{};
+        if (!client_->QueryOrderById(instrument, id, report)) {
+            WARN("Query orphan order failed: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+            continue;
+        }
+        if (report.status == OrderStatus::NEW || report.status == OrderStatus::PARTIALLY_FILLED) {
+            INFO("Skip orphan still live on remote: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+            continue;
+        }
+        INFO("Replay missed terminal: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument + ", [STATUS] " +
+             ToString(report.status));
+        HandleOrderUpdate(report);
+    }
+}
+
+void TradingEngine::ReconcileBalances() {
+    auto balances = client_->QueryBalances();
+    for (const auto& [currency, balance] : balances) {
+        position_manager_.SyncSpotFromExchange(currency, std::get<0>(balance), std::get<1>(balance),
+                                               std::get<2>(balance));
+    }
+}
+
+void TradingEngine::ReconcileSwapPositions() {
+    auto swap_positions = client_->QuerySwapPositions();
+    for (const auto& [instrument, side_map] : swap_positions) {
+        for (const auto& [position_side, swap_position] : side_map) {
+            position_manager_.SyncSwapFromExchange(instrument, position_side, swap_position.contracts,
+                                                   swap_position.average_opening_price);
         }
     }
 }
@@ -142,6 +212,20 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     std::string side_str = ToString(report.side);
 
     const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+
+    if (report.status == OrderStatus::CANCELLED) {
+        std::lock_guard<std::mutex> lock(live_orders_mutex_);
+        if (live_order_instruments_.erase(order_id) == 0) {
+            INFO("Skip duplicate cancelled event: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument);
+            return;
+        }
+    } else if (report.status == OrderStatus::NEW) {
+        std::lock_guard<std::mutex> lock(live_orders_mutex_);
+        live_order_instruments_[order_id] = instrument;
+    } else if (report.status == OrderStatus::FILLED || report.status == OrderStatus::REJECTED) {
+        std::lock_guard<std::mutex> lock(live_orders_mutex_);
+        live_order_instruments_.erase(order_id);
+    }
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
         if (report.market_type == MarketType::SWAP) {

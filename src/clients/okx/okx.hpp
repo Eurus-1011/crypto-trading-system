@@ -16,6 +16,8 @@ static constexpr const char* OkxPublicWsPath = "/ws/v5/public";
 static constexpr const char* OkxPrivateWsPath = "/ws/v5/private";
 static constexpr const char* OkxApiInstruments = "/api/v5/public/instruments";
 static constexpr const char* OkxApiOrdersPending = "/api/v5/trade/orders-pending";
+static constexpr const char* OkxApiOrder = "/api/v5/trade/order";
+static constexpr const char* OkxApiFills = "/api/v5/trade/fills";
 static constexpr const char* OkxApiBalance = "/api/v5/account/balance";
 static constexpr const char* OkxApiPositions = "/api/v5/account/positions";
 static constexpr const char* OkxChannelTickers = "tickers";
@@ -119,6 +121,8 @@ class OkxClient : public ExchangeClient {
   public:
     std::vector<ExecutionReport> QuerySpotPendingOrders();
     std::vector<ExecutionReport> QuerySwapPendingOrders();
+    bool QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report);
+    std::vector<Fill> QueryRecentFills(int64_t since_ms, const std::string& inst_type);
     std::map<std::string, std::tuple<double, double, double>> QueryBalances();
     std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
     void FetchInstrumentInfo(const std::vector<std::string>& instruments);

@@ -259,6 +259,40 @@ struct OrderRequest {
     std::string target_currency;
 };
 
+struct Fill {
+    char instrument[32];
+    char order_id[32];
+    char trade_id[32];
+    MarketType market_type;
+    Side side;
+    PosSide position_side;
+    Price price;
+    Volume volume;
+    double fee;
+    char fee_currency[16];
+    int64_t timestamp_ms;
+
+    void SetInstrument(const char* src) {
+        std::strncpy(instrument, src, sizeof(instrument) - 1);
+        instrument[sizeof(instrument) - 1] = '\0';
+    }
+
+    void SetOrderId(const char* src) {
+        std::strncpy(order_id, src, sizeof(order_id) - 1);
+        order_id[sizeof(order_id) - 1] = '\0';
+    }
+
+    void SetTradeId(const char* src) {
+        std::strncpy(trade_id, src, sizeof(trade_id) - 1);
+        trade_id[sizeof(trade_id) - 1] = '\0';
+    }
+
+    void SetFeeCurrency(const char* src) {
+        std::strncpy(fee_currency, src, sizeof(fee_currency) - 1);
+        fee_currency[sizeof(fee_currency) - 1] = '\0';
+    }
+};
+
 static constexpr const char* SHM_SIGNAL = "/cts_signal";
 static constexpr const char* SHM_EXECUTION_REPORT = "/cts_exec_report";
 
