@@ -312,15 +312,228 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
     return result;
 }
 
-std::vector<ExecutionReport> OkxClient::QuerySpotPendingOrders() {
-    auto result = QueryPendingOrdersByType("SPOT");
-    INFO("Query spot pending orders complete: [COUNT] " + std::to_string(result.size()));
-    return result;
+std::vector<ExecutionReport> OkxClient::QuerySpotPendingOrders() { return QueryPendingOrdersByType("SPOT"); }
+
+std::vector<ExecutionReport> OkxClient::QuerySwapPendingOrders() { return QueryPendingOrdersByType("SWAP"); }
+
+bool OkxClient::QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report) {
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    std::string path = std::string(OkxApiOrder) + "?instId=" + instrument + "&ordId=" + order_id;
+    std::string timestamp = IsoTimestampForRest();
+    std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
+    std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
+                          "\r\n"
+                          "OK-ACCESS-SIGN: " +
+                          signature +
+                          "\r\n"
+                          "OK-ACCESS-TIMESTAMP: " +
+                          timestamp +
+                          "\r\n"
+                          "OK-ACCESS-PASSPHRASE: " +
+                          config_.passphrase + "\r\n";
+
+    std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
+    if (raw_body.empty()) {
+        WARN("Query order failed: [INSTRUMENT] " + instrument + ", [ORDER_ID] " + order_id);
+        return false;
+    }
+
+    auto json_start = raw_body.find('{');
+    if (json_start == std::string::npos) {
+        WARN("Query order: invalid response, [INSTRUMENT] " + instrument + ", [ORDER_ID] " + order_id);
+        return false;
+    }
+
+    simdjson::ondemand::parser parser;
+    simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+    simdjson::ondemand::document doc;
+    if (parser.iterate(padded_body).get(doc)) {
+        WARN("Query order parse failed: [INSTRUMENT] " + instrument + ", [ORDER_ID] " + order_id);
+        return false;
+    }
+
+    std::string_view code_str;
+    if (doc["code"].get(code_str) || code_str != "0") {
+        std::string_view msg_str;
+        (void)doc["msg"].get(msg_str);
+        WARN("Query order error: [INSTRUMENT] " + instrument + ", [ORDER_ID] " + order_id + ", [MSG] " +
+             std::string(msg_str));
+        return false;
+    }
+
+    simdjson::ondemand::array data_array;
+    if (doc["data"].get_array().get(data_array)) {
+        return false;
+    }
+
+    for (auto order_result : data_array) {
+        simdjson::ondemand::value order_element;
+        if (order_result.get(order_element)) {
+            break;
+        }
+
+        std::string_view inst_id, ord_id, state, side, pos_side, fee_currency, trade_mode;
+        (void)order_element["instId"].get(inst_id);
+        (void)order_element["ordId"].get(ord_id);
+        (void)order_element["state"].get(state);
+        (void)order_element["side"].get(side);
+        (void)order_element["posSide"].get(pos_side);
+        (void)order_element["feeCcy"].get(fee_currency);
+        (void)order_element["tdMode"].get(trade_mode);
+
+        std::string inst_id_str(inst_id);
+
+        report = ExecutionReport{};
+        report.SetInstrument(inst_id_str.c_str());
+        report.SetOrderId(std::string(ord_id).c_str());
+        report.status = OkxParseOrderState(state);
+        report.side = OkxParseSide(side.empty() ? "buy" : side);
+        report.market_type = DetectMarketType(inst_id_str.c_str());
+        report.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+        report.trade_mode = OkxParseTradeMode(trade_mode.empty() ? "cash" : trade_mode);
+
+        const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+        if (!info) {
+            WARN("Query order for unregistered instrument: [INSTRUMENT] " + inst_id_str);
+            return false;
+        }
+
+        double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
+        (void)order_element["px"].get_double_in_string().get(px_value);
+        (void)order_element["accFillSz"].get_double_in_string().get(acc_fill_sz_value);
+        (void)order_element["sz"].get_double_in_string().get(sz_value);
+        report.price = Encode(px_value, info->price_precision);
+        report.filled_volume = Encode(acc_fill_sz_value, info->volume_precision);
+        report.total_volume = Encode(sz_value, info->volume_precision);
+        (void)order_element["avgPx"].get_double_in_string().get(report.avg_fill_price);
+        (void)order_element["fee"].get_double_in_string().get(report.fee);
+        report.SetFeeCurrency(std::string(fee_currency).c_str());
+        return true;
+    }
+
+    return false;
 }
 
-std::vector<ExecutionReport> OkxClient::QuerySwapPendingOrders() {
-    auto result = QueryPendingOrdersByType("SWAP");
-    INFO("Query swap pending orders complete: [COUNT] " + std::to_string(result.size()));
+std::vector<Fill> OkxClient::QueryRecentFills(int64_t since_ms, const std::string& inst_type) {
+    std::vector<Fill> result;
+    std::string proxy_host, proxy_port;
+    DetectHttpProxy(proxy_host, proxy_port);
+
+    simdjson::ondemand::parser parser;
+    std::string after_cursor;
+    while (true) {
+        std::string path = std::string(OkxApiFills) + "?instType=" + inst_type + "&begin=" + std::to_string(since_ms);
+        if (!after_cursor.empty()) {
+            path += "&after=" + after_cursor;
+        }
+
+        std::string timestamp = IsoTimestampForRest();
+        std::string signature = HmacSha256Sign(config_.secret_key, timestamp + "GET" + path);
+        std::string headers = "OK-ACCESS-KEY: " + config_.api_key +
+                              "\r\n"
+                              "OK-ACCESS-SIGN: " +
+                              signature +
+                              "\r\n"
+                              "OK-ACCESS-TIMESTAMP: " +
+                              timestamp +
+                              "\r\n"
+                              "OK-ACCESS-PASSPHRASE: " +
+                              config_.passphrase + "\r\n";
+
+        std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, headers, "", proxy_host, proxy_port);
+        if (raw_body.empty()) {
+            WARN("Query fills failed: [INST_TYPE] " + inst_type);
+            break;
+        }
+
+        auto json_start = raw_body.find('{');
+        if (json_start == std::string::npos) {
+            WARN("Query fills: invalid response, [INST_TYPE] " + inst_type);
+            break;
+        }
+
+        simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
+        simdjson::ondemand::document doc;
+        if (parser.iterate(padded_body).get(doc)) {
+            WARN("Query fills parse failed: [INST_TYPE] " + inst_type);
+            break;
+        }
+
+        std::string_view code_str;
+        if (doc["code"].get(code_str) || code_str != "0") {
+            std::string_view msg_str;
+            (void)doc["msg"].get(msg_str);
+            WARN("Query fills error: [INST_TYPE] " + inst_type + ", [MSG] " + std::string(msg_str));
+            break;
+        }
+
+        simdjson::ondemand::array data_array;
+        if (doc["data"].get_array().get(data_array)) {
+            break;
+        }
+
+        size_t data_count = 0;
+        std::string last_bill_id;
+
+        for (auto fill_result : data_array) {
+            simdjson::ondemand::value fill_element;
+            if (fill_result.get(fill_element)) {
+                break;
+            }
+
+            std::string_view inst_id, ord_id, trade_id, bill_id, inst_type_str, side, pos_side, fee_currency;
+            (void)fill_element["instId"].get(inst_id);
+            (void)fill_element["ordId"].get(ord_id);
+            (void)fill_element["tradeId"].get(trade_id);
+            (void)fill_element["billId"].get(bill_id);
+            (void)fill_element["instType"].get(inst_type_str);
+            (void)fill_element["side"].get(side);
+            (void)fill_element["posSide"].get(pos_side);
+            (void)fill_element["feeCcy"].get(fee_currency);
+
+            std::string bill_id_str(bill_id);
+
+            Fill fill{};
+            fill.SetInstrument(std::string(inst_id).c_str());
+            fill.SetOrderId(std::string(ord_id).c_str());
+            fill.SetTradeId(std::string(trade_id).c_str());
+            fill.market_type = OkxParseInstType(inst_type_str);
+            fill.side = OkxParseSide(side.empty() ? "buy" : side);
+            fill.position_side = OkxParsePosSide(pos_side.empty() ? "net" : pos_side);
+
+            const auto* info = InstrumentRegistry::Instance().Find(fill.instrument);
+            if (!info) {
+                WARN("Skip fill for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
+                last_bill_id = std::move(bill_id_str);
+                ++data_count;
+                continue;
+            }
+
+            double fill_px_value = 0.0, fill_sz_value = 0.0;
+            (void)fill_element["fillPx"].get_double_in_string().get(fill_px_value);
+            (void)fill_element["fillSz"].get_double_in_string().get(fill_sz_value);
+            fill.price = Encode(fill_px_value, info->price_precision);
+            fill.volume = Encode(fill_sz_value, info->volume_precision);
+            (void)fill_element["fee"].get_double_in_string().get(fill.fee);
+            fill.SetFeeCurrency(std::string(fee_currency).c_str());
+
+            int64_t ts_value = 0;
+            (void)fill_element["ts"].get_int64_in_string().get(ts_value);
+            fill.timestamp_ms = ts_value;
+
+            result.push_back(fill);
+
+            last_bill_id = std::move(bill_id_str);
+            ++data_count;
+        }
+
+        if (data_count < 100) {
+            break;
+        }
+        after_cursor = last_bill_id;
+    }
     return result;
 }
 
@@ -477,9 +690,6 @@ std::map<std::string, std::map<PosSide, SwapPosition>> OkxClient::QuerySwapPosit
             swap_position.average_opening_price = average_opening_price;
             swap_position.unrealized_profit_loss = unrealized_profit_loss;
             result[instrument][position_side] = swap_position;
-            INFO("Query swap position: [INSTRUMENT] " + instrument + ", [POSITION_SIDE] " + ToString(position_side) +
-                 ", [CONTRACTS] " + std::to_string(contracts) + ", [AVERAGE_OPENING_PRICE] " +
-                 std::to_string(average_opening_price));
         }
     }
     return result;
@@ -644,7 +854,7 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
         WARN("Skip order update for unregistered instrument: [INSTRUMENT] " + inst_id_str);
         return;
     }
-    
+
     double px_value = 0.0, acc_fill_sz_value = 0.0, sz_value = 0.0;
     (void)data["px"].get_double_in_string().get(px_value);
     (void)data["accFillSz"].get_double_in_string().get(acc_fill_sz_value);

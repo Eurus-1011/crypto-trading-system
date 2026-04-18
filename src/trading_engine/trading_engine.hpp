@@ -18,6 +18,9 @@ class TradingEngine {
     void RunOrderDispatcher();
     void RunOrderListener();
     void RunReconciler();
+    void ReconcileOrders();
+    void ReconcileBalances();
+    void ReconcileSwapPositions();
     void HandleOrderUpdate(const ExecutionReport& report);
 
     const SystemConfig& config_;
@@ -27,4 +30,6 @@ class TradingEngine {
     PositionManager position_manager_;
     std::atomic<bool> running_{true};
     std::vector<ExecutionReport> pending_orders_;
+    std::unordered_map<std::string, std::string> live_order_instruments_;
+    mutable std::mutex live_orders_mutex_;
 };
