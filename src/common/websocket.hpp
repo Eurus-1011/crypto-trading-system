@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
@@ -64,6 +65,14 @@ inline bool WsClient::TcpConnect(const std::string& host, const std::string& por
             continue;
         }
         if (connect(fd_, rp->ai_addr, rp->ai_addrlen) == 0) {
+            int yes = 1;
+            ::setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
+            int keepidle = 10, keepintvl = 3, keepcnt = 3;
+            ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+            ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+            ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+            unsigned int user_timeout_ms = 15000;
+            ::setsockopt(fd_, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof(user_timeout_ms));
             freeaddrinfo(result);
             return true;
         }
