@@ -2,12 +2,12 @@
 
 #include "common/cpu_affinity.hpp"
 #include "common/logger.hpp"
-#include "common/utils.hpp"
 
 #include <chrono>
 #include <immintrin.h>
 #include <thread>
 #include <unordered_set>
+#include <utils.hpp>
 
 static std::string LockedCurrency(const char* instrument, Side side) {
     const char* dash = std::strchr(instrument, '-');

@@ -1,12 +1,13 @@
 #include "common/config.hpp"
-#include "common/defs.hpp"
 #include "common/logger.hpp"
 #include "quotation_engine/quotation_engine.hpp"
+#include "strategy_engine/plugin_loader.hpp"
 #include "strategy_engine/strategy_engine.hpp"
-#include "strategy_engine/strategy_registry.hpp"
 #include "trading_engine/trading_engine.hpp"
 
 #include <csignal>
+#include <defs.hpp>
+#include <strategy_registry.hpp>
 #include <thread>
 
 static QuotationEngine* global_quotation_engine = nullptr;
@@ -54,6 +55,15 @@ int main(int argc, char* argv[]) {
     INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [INSTRUMENTS] " +
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +
          JoinStrings(config.quotation_engine.channels) + ", [STRATEGY] " + config.strategy_engine.name);
+
+    for (const auto& plugin_path : config.strategy_engine.plugin_paths) {
+        std::string plugin_err;
+        if (!LoadPlugin(plugin_path, plugin_err)) {
+            ERROR("Plugin load failed: " + plugin_err);
+            return 1;
+        }
+        INFO("Plugin loaded: " + plugin_path);
+    }
 
     auto* ticker_ring = shm_create<Ticker, 4096>(SHM_TICKER);
     auto* bbo_ring = shm_create<BBO, 8192>(SHM_BBO);

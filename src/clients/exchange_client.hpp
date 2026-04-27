@@ -1,9 +1,9 @@
 #pragma once
 
-#include "common/defs.hpp"
 #include "common/websocket.hpp"
 
 #include <atomic>
+#include <defs.hpp>
 #include <functional>
 #include <mutex>
 #include <simdjson.h>

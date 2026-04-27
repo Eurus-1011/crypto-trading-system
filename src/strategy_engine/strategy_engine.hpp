@@ -1,10 +1,13 @@
 #pragma once
 
 #include "common/config.hpp"
-#include "strategy_engine/strategy.hpp"
 
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <position_manager.hpp>
+#include <strategy.hpp>
+#include <vector>
 
 class StrategyEngine {
   public:
@@ -16,7 +19,7 @@ class StrategyEngine {
     void Stop();
     void SetFactory(StrategyFactory factory) { factory_ = std::move(factory); }
     void SetPendingOrders(const std::vector<ExecutionReport>& orders) { pending_orders_ = orders; }
-    void SetPositionManager(PositionManager* pm) { position_manager_ = pm; }
+    void SetPositionManager(IPositionManager* pm) { position_manager_ = pm; }
 
   private:
     const SystemConfig& config_;
@@ -26,7 +29,7 @@ class StrategyEngine {
     TradeRing* trade_ring_;
     SignalRing* signal_ring_;
     ExecutionReportRing* report_ring_;
-    PositionManager* position_manager_;
+    IPositionManager* position_manager_;
     StrategyFactory factory_;
     std::atomic<bool> running_{true};
     std::vector<ExecutionReport> pending_orders_;

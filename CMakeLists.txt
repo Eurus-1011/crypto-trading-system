@@ -19,6 +19,7 @@ find_package(OpenSSL REQUIRED)
 
 add_subdirectory(third_party/quill EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/simdjson EXCLUDE_FROM_ALL)
+add_subdirectory(sdk)
 
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 
@@ -35,17 +36,18 @@ target_link_libraries(exchange_client PUBLIC
     OpenSSL::SSL
     quill::quill
     pthread
+    sdk
 )
 
 add_executable(${TARGET_NAME}
     src/main.cpp
     src/quotation_engine/quotation_engine.cpp
-    src/strategy_engine/strategy.cpp
+    src/strategy_engine/plugin_loader.cpp
     src/strategy_engine/strategy_engine.cpp
     src/strategy_engine/multi_mesh/multi_mesh.cpp
     src/trading_engine/trading_engine.cpp
     src/trading_engine/position_manager.cpp
 )
 target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR})
-target_link_libraries(${TARGET_NAME} PRIVATE exchange_client rt)
+target_link_libraries(${TARGET_NAME} PRIVATE exchange_client sdk rt dl)
 target_compile_options(${TARGET_NAME} PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)

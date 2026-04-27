@@ -1,8 +1,6 @@
-#include "strategy.hpp"
-
-#include "common/utils.hpp"
-
 #include <cstring>
+#include <strategy.hpp>
+#include <utils.hpp>
 
 static std::string ExtractBase(const char* instrument) {
     const char* dash = std::strchr(instrument, '-');

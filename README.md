@@ -4,7 +4,7 @@ A high-performance C++23 trading framework for cryptocurrency markets. Built wit
 
 ## Core Features
 
-- **Extensible Strategy Framework**: Base `Strategy` class for implementing custom trading algorithms
+- **Pluggable Strategies**: Custom strategies as runtime-loaded `.so` plugins via the `sdk` interface
 - **Real-time Quotation Engine**: WebSocket-based market data ingestion with low-latency processing
 - **Automated Trading Engine**: Order placement, position management, and fill reconciliation
 - **Exchange Integration**: OKX exchange support with spot and swap trading
@@ -24,7 +24,7 @@ A high-performance C++23 trading framework for cryptocurrency markets. Built wit
 ### Strategy Engine
 - Strategy lifecycle management and concurrent execution
 - Position tracking with reserved balance accounting
-- Pluggable via `Strategy` base class abstraction
+- Runtime plugin loading via the `sdk` shared library
 
 ### Trading Engine
 - Order lifecycle management (pending, filled, rejected)
@@ -48,7 +48,6 @@ A high-performance C++23 trading framework for cryptocurrency markets. Built wit
 - **Compiler**: Clang 18+ (with C++23 support)
 - **Build System**: CMake 3.16+
 - **Libraries**:
-  - jsoncpp (JSON processing)
   - OpenSSL (cryptography)
   - pthread (thread support)
 
@@ -63,7 +62,7 @@ A high-performance C++23 trading framework for cryptocurrency markets. Built wit
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake clang-18 libjsoncpp-dev libssl-dev
+sudo apt-get install -y cmake clang-18 libssl-dev
 ```
 
 ### 2. Clone Repository
@@ -91,7 +90,7 @@ The compiled binary will be at: `build/crypto-trading-system`
 2. Edit `config/config.json` with your trading parameters:
    - Exchange API credentials (API key, secret, passphrase)
    - Instrument ID (e.g., `BTC-USDT`)
-   - Strategy configuration
+   - Strategy configuration (inline `params` or external `params_path`, optional `plugin_paths`)
    - Logging preferences
 
 ## Usage
@@ -145,25 +144,11 @@ Valid types: `Feat`, `Fix`, `Chore`, `Refactor`, `Perf`, `Docs`, `Style`, `Test`
 
 ### Building Custom Strategies
 
-The framework provides a `Strategy` base class for implementing custom trading logic:
+Strategies are runtime-loaded `.so` plugins built against the `sdk` shared library.
 
-```cpp
-class MyStrategy : public Strategy {
-public:
-    void OnTick(const MarketData& data) override {
-        // Implement your trading logic
-    }
-    
-    void OnFill(const OrderFill& fill) override {
-        // Handle order fills
-    }
-};
-```
-
-Strategies are registered and executed by the `StrategyEngine` with access to:
-- Current market data from `QuotationEngine`
-- Exchange API through `TradingEngine`
-- Position and balance information
+1. Install the SDK: `cmake --install build --prefix ~/.local`
+2. In your plugin source, inherit `Strategy` from `<strategy.hpp>`, register via `REGISTER_STRATEGY(MyStrategy)`, and add `DECLARE_PLUGIN_ABI()` once per plugin.
+3. Build as `SHARED` linking `sdk::sdk`; reference the `.so` path from `config.json` `strategy_engine.plugin_paths`.
 
 ### Code Style
 
@@ -177,10 +162,11 @@ clang-format -i src/**/*.cpp
 
 ```
 .
+├── sdk/                          # Shared library exposing the strategy ABI
 ├── src/
 │   ├── main.cpp
 │   ├── quotation_engine/         # Market data processing
-│   ├── strategy_engine/          # Strategy execution framework
+│   ├── strategy_engine/          # Strategy execution + plugin loader
 │   ├── trading_engine/           # Order and position management
 │   └── clients/                  # Exchange API implementations
 ├── config/                       # Configuration templates
@@ -188,10 +174,6 @@ clang-format -i src/**/*.cpp
 ├── CMakeLists.txt                # Build configuration
 └── .github/workflows/            # CI/CD definitions
 ```
-
-## Architecture Notes
-
-Architecture diagrams coming soon.
 
 ## Example Strategies
 

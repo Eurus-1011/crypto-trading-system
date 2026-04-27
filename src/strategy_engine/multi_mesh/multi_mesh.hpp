@@ -1,10 +1,9 @@
 #pragma once
 
-#include "strategy_engine/strategy.hpp"
-
 #include <chrono>
 #include <map>
 #include <simdjson.h>
+#include <strategy.hpp>
 #include <string_view>
 
 enum class GridState : int8_t { EMPTY, BUY_PENDING, SELL_PENDING, CANCEL_PENDING };
