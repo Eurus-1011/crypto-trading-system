@@ -2,7 +2,8 @@
 
 #include "common/https.hpp"
 #include "common/logger.hpp"
-#include "common/utils.hpp"
+
+#include <utils.hpp>
 
 OkxClient::OkxClient(const ExchangeConfig& config) : config_(config) {}
 

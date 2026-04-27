@@ -1,9 +1,9 @@
 #include "position_manager.hpp"
 
 #include "common/logger.hpp"
-#include "common/utils.hpp"
 
 #include <cmath>
+#include <utils.hpp>
 
 void PositionManager::InitSpotFromExchange(const std::map<std::string, std::tuple<double, double, double>>& balances) {
     std::lock_guard<std::mutex> lock(mutex_);

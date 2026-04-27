@@ -1,9 +1,8 @@
 #pragma once
 
-#include "ring_shm.hpp"
-
 #include <cstdint>
 #include <cstring>
+#include <ring_shm.hpp>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -320,10 +319,7 @@ struct InstrumentInfo {
 
 class InstrumentRegistry {
   public:
-    static InstrumentRegistry& Instance() {
-        static InstrumentRegistry instance;
-        return instance;
-    }
+    static InstrumentRegistry& Instance();
 
     void Add(const InstrumentInfo& info) { instruments_[info.instrument] = info; }
 

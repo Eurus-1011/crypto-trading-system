@@ -26,6 +26,7 @@ struct StrategyEngineConfig {
     std::string name;
     std::string params_json;
     std::vector<int> cpu_affinity;
+    std::vector<std::string> plugin_paths;
 };
 
 struct TradingEngineConfig {
@@ -125,8 +126,21 @@ inline bool LoadConfig(const std::string& path, SystemConfig& out, std::string& 
         auto params_element = se["params"];
         if (!params_element.error()) {
             out.strategy_engine.params_json = simdjson::minify(params_element.value());
+        } else {
+            std::string_view params_path_sv;
+            if (!se["params_path"].get(params_path_sv)) {
+                simdjson::dom::parser params_parser;
+                auto params_doc = params_parser.load(std::string(params_path_sv));
+                if (params_doc.error()) {
+                    err = "failed to load strategy_engine.params_path '" + std::string(params_path_sv) +
+                          "': " + std::string(simdjson::error_message(params_doc.error()));
+                    return false;
+                }
+                out.strategy_engine.params_json = simdjson::minify(params_doc.value());
+            }
         }
         ParseCpuAffinity(se, out.strategy_engine.cpu_affinity);
+        ParseStringArray(se, "plugin_paths", out.strategy_engine.plugin_paths);
     }
 
     auto te_result = root["trading_engine"];

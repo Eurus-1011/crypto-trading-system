@@ -1,10 +1,10 @@
 #include "multi_mesh.hpp"
 
 #include "common/logger.hpp"
-#include "common/utils.hpp"
-#include "strategy_engine/strategy_registry.hpp"
 
 #include <cmath>
+#include <strategy_registry.hpp>
+#include <utils.hpp>
 
 static bool ParsePosSide(std::string_view s, PosSide& out) {
     if (s == "long") {

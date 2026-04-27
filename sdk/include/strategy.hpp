@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/defs.hpp"
-#include "trading_engine/position_manager.hpp"
-
+#include <atomic>
+#include <defs.hpp>
+#include <position_manager.hpp>
 #include <string_view>
 #include <vector>
 
@@ -11,7 +11,7 @@ class Strategy {
     virtual ~Strategy() = default;
 
     void Bind(SignalRing* signal_ring) { signal_ring_ = signal_ring; }
-    void SetPositionManager(PositionManager* position_manager) { position_manager_ = position_manager; }
+    void SetPositionManager(IPositionManager* position_manager) { position_manager_ = position_manager; }
 
     virtual void Init(std::string_view params_json) = 0;
     virtual void Reconstruct(const std::vector<ExecutionReport>& pending_orders) {}
@@ -35,6 +35,6 @@ class Strategy {
     void EmitCancel(const char* instrument, const char* order_id, MarketType market_type);
 
     SignalRing* signal_ring_ = nullptr;
-    PositionManager* position_manager_ = nullptr;
+    IPositionManager* position_manager_ = nullptr;
     std::atomic<bool> running_{true};
 };

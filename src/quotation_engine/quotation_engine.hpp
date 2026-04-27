@@ -1,7 +1,8 @@
 #pragma once
 
 #include "common/config.hpp"
-#include "common/defs.hpp"
+
+#include <defs.hpp>
 
 class ExchangeClient;
 
