@@ -21,3 +21,5 @@ config/config.json
 
 logs/
 data/
+strategies/
+.deploy.env
