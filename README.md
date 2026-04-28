@@ -148,7 +148,8 @@ Strategies are runtime-loaded `.so` plugins built against the `sdk` shared libra
 
 1. Install the SDK: `cmake --install build --prefix ~/.local`
 2. In your plugin source, inherit `Strategy` from `<strategy.hpp>`, register via `REGISTER_STRATEGY(MyStrategy)`, and add `DECLARE_PLUGIN_ABI()` once per plugin.
-3. Build as `SHARED` linking `sdk::sdk`; reference the `.so` path from `config.json` `strategy_engine.plugin_paths`.
+3. Use `SDK_INFO/SDK_WARN/SDK_ERROR` from `<log.hpp>` for plugin logging — routed to the host's `logs/system.log`.
+4. Build as `SHARED` linking `sdk::sdk`; reference the `.so` path from `config.json` `strategy_engine.plugin_paths`.
 
 ### Code Style
 

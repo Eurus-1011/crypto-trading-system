@@ -7,6 +7,7 @@
 
 #include <csignal>
 #include <defs.hpp>
+#include <log.hpp>
 #include <strategy_registry.hpp>
 #include <thread>
 
@@ -51,6 +52,9 @@ int main(int argc, char* argv[]) {
     }
 
     InitLog(config.logger.cpu_affinity, config.logger.path);
+
+    sdk_set_logger([](const char* m) { INFO(std::string(m)); }, [](const char* m) { WARN(std::string(m)); },
+                   [](const char* m) { ERROR(std::string(m)); });
 
     INFO("System init success: [EXCHANGE] " + config.exchange.name + ", [INSTRUMENTS] " +
          JoinStrings(config.quotation_engine.instruments) + ", [CHANNELS] " +

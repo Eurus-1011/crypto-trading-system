@@ -3,6 +3,7 @@ add_library(sdk SHARED
     src/strategy_registry.cpp
     src/instrument_registry.cpp
     src/position_manager.cpp
+    src/log.cpp
 )
 
 target_include_directories(sdk PUBLIC
