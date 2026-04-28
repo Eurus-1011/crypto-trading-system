@@ -4,6 +4,32 @@ set -e
 
 cd "$(dirname "$0")/.."
 
+CONFIG=""
+ARCHIVE=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --config)
+            CONFIG="$2"
+            shift 2
+            ;;
+        --archive)
+            ARCHIVE=1
+            shift
+            ;;
+        *)
+            echo "Usage: $0 --config <path> [--archive]"
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z "$CONFIG" ]; then
+    echo "Error: --config <path> is required"
+    echo "Usage: $0 --config <path> [--archive]"
+    exit 1
+fi
+
 if [ ! -f .deploy.env ]; then
     echo "Error: .deploy.env not found"
     echo "Create it with:"
@@ -23,6 +49,11 @@ if [ ! -d "$STRATEGY_DIR/build" ]; then
     exit 1
 fi
 
+if [ ! -f "$CONFIG" ]; then
+    echo "Error: config file not found: $CONFIG"
+    exit 1
+fi
+
 mkdir -p strategies
 count=0
 for so in "$STRATEGY_DIR"/build/*/src/*.so; do
@@ -37,8 +68,10 @@ if [ "$count" -eq 0 ]; then
     exit 1
 fi
 
-bash scripts/archive.sh
+if [ "$ARCHIVE" -eq 1 ]; then
+    bash scripts/archive.sh
+fi
 
 TARGET_NAME=crypto-trading-system
-nohup ./build/${TARGET_NAME} config/config.json > /dev/null 2>&1 &
-echo "Started: pid=$!"
+nohup ./build/${TARGET_NAME} "$CONFIG" > /dev/null 2>&1 &
+echo "Started: pid=$! (config=$CONFIG)"

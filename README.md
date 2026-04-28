@@ -104,10 +104,11 @@ echo STRATEGY_DIR=/path/to/strategy/repo > .deploy.env
 Daily run:
 
 ```bash
-sh scripts/deploy.sh
+sh scripts/deploy.sh --config config/config.json                 # required
+sh scripts/deploy.sh --config config/config-Foo.json --archive   # also roll prior logs
 ```
 
-`deploy.sh` copies all `*.so` from `$STRATEGY_DIR/build/*/src/` into `./strategies/`, archives prior logs, then launches the binary in the background reading `config/config.json`. Re-running it is idempotent — a clean redeploy.
+`deploy.sh` copies all `*.so` from `$STRATEGY_DIR/build/*/src/` into `./strategies/`, then launches the binary in the background reading the given config. Re-running it is idempotent — a clean redeploy. Pass `--archive` to roll prior `logs/system.log` into `logs/archived/` before launch.
 
 ### Monitor
 
