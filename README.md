@@ -93,19 +93,25 @@ The compiled binary will be at: `build/crypto-trading-system`
    - Strategy configuration (inline `params` or external `params_path`, optional `plugin_paths`)
    - Logging preferences
 
-## Usage
+## Deploy
 
-### Start Trading System
-
-```bash
-./build/crypto-trading-system config/config.json
-```
-
-### Monitor Output
+Strategies are loaded as `.so` plugins built in a sibling repository. One-time setup, gitignored locally:
 
 ```bash
-tail -f logs/trading.log
+echo STRATEGY_DIR=/path/to/strategy/repo > .deploy.env
 ```
+
+Daily run:
+
+```bash
+sh scripts/deploy.sh
+```
+
+`deploy.sh` copies all `*.so` from `$STRATEGY_DIR/build/*/src/` into `./strategies/`, archives prior logs, then launches the binary in the background reading `config/config.json`. Re-running it is idempotent — a clean redeploy.
+
+### Monitor
+
+Tail the log file you configured at `config.logger.path`.
 
 ### Graceful Shutdown
 
@@ -117,13 +123,15 @@ The system will gracefully stop, cancel pending orders, and close connections.
 
 ## Build & Test
 
-### Build Release
+### Build & Install
 
 ```bash
-make build
+make
 ```
 
-### Clean Build Artifacts
+Builds the binary and installs `libsdk.so` + headers to `~/.local` (override with `PREFIX=...`), so plugin repos can `find_package(sdk)` against it.
+
+### Clean
 
 ```bash
 make clean
@@ -148,7 +156,7 @@ Strategies are runtime-loaded `.so` plugins built against the `sdk` shared libra
 
 1. Install the SDK: `cmake --install build --prefix ~/.local`
 2. In your plugin source, inherit `Strategy` from `<strategy.hpp>`, register via `REGISTER_STRATEGY(MyStrategy)`, and add `DECLARE_PLUGIN_ABI()` once per plugin.
-3. Use `SDK_INFO/SDK_WARN/SDK_ERROR` from `<log.hpp>` for plugin logging — routed to the host's `logs/system.log`.
+3. Use `SDK_INFO/SDK_WARN/SDK_ERROR` from `<log.hpp>` for plugin logging — routed through the host's logger.
 4. Build as `SHARED` linking `sdk::sdk`; reference the `.so` path from `config.json` `strategy_engine.plugin_paths`.
 
 ### Code Style
