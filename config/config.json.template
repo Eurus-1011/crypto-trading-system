@@ -17,7 +17,8 @@
     "strategy_engine": {
         "cpu_affinity": [],
         "name": "",
-        "params": {}
+        "plugin_paths": [],
+        "params_path": ""
     },
     "trading_engine": {
         "cpu_affinity": []

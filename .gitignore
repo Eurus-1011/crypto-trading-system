@@ -15,7 +15,7 @@ compile_commands.json
 .DS_Store
 Thumbs.db
 
-config/config.json
+config/*.json
 *.key
 *.pem
 
