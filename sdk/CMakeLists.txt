@@ -32,7 +32,7 @@ install(EXPORT sdkTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sdk
 )
 
-configure_package_config_file(cmake/sdkConfig.cmake.in
+configure_package_config_file(cmake.install
     ${CMAKE_CURRENT_BINARY_DIR}/sdkConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sdk
 )
