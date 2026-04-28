@@ -93,7 +93,13 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
 
-    trading_engine.Init();
+    try {
+        trading_engine.Init();
+    } catch (const std::exception& e) {
+        ERROR("Trading engine init failed: " + std::string(e.what()));
+        ShutdownLog();
+        return 1;
+    }
     strategy_engine.SetPendingOrders(trading_engine.GetPendingOrders());
 
     PositionManager* position_manager = &trading_engine.GetPositionManager();
