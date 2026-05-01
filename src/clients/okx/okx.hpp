@@ -96,6 +96,11 @@ inline TradeMode OkxParseTradeMode(std::string_view s) {
     return it != kOkxTradeModeEnum.end() ? it->second : TradeMode::CASH;
 }
 
+struct PendingOrderInfo {
+    ExecutionReport report;
+    std::string client_order_id;
+};
+
 class OkxClient : public ExchangeClient {
   public:
     OkxClient(const ExchangeConfig& config);
@@ -119,16 +124,17 @@ class OkxClient : public ExchangeClient {
     std::string GetPrivateWsPath() override;
 
   public:
-    std::vector<ExecutionReport> QuerySpotPendingOrders();
-    std::vector<ExecutionReport> QuerySwapPendingOrders();
-    bool QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report);
+    std::vector<PendingOrderInfo> QuerySpotPendingOrders();
+    std::vector<PendingOrderInfo> QuerySwapPendingOrders();
+    bool QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report,
+                        std::string& client_order_id);
     std::vector<Fill> QueryRecentFills(int64_t since_ms, const std::string& inst_type);
     std::map<std::string, std::tuple<double, double, double>> QueryBalances();
     std::map<std::string, std::map<PosSide, SwapPosition>> QuerySwapPositions();
-    void FetchInstrumentInfo(const std::vector<std::string>& instruments);
+    void FetchAllInstruments();
 
   private:
-    std::vector<ExecutionReport> QueryPendingOrdersByType(const std::string& inst_type);
+    std::vector<PendingOrderInfo> QueryPendingOrdersByType(const std::string& inst_type);
 
     void DecodeTicker(simdjson::ondemand::value data, const std::string& inst_id);
     void DecodeBBO(simdjson::ondemand::value data, const std::string& inst_id);

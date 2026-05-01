@@ -25,23 +25,36 @@ void PositionManager::InitSpotFromExchange(const std::map<std::string, std::tupl
 void PositionManager::SyncSpotFromExchange(const std::string& currency, double exchange_available,
                                            double exchange_frozen, double exchange_borrowed) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto& position = spot_positions_[currency];
-    position.currency = currency;
+    auto it = spot_positions_.find(currency);
+    if (it == spot_positions_.end()) {
+        if (exchange_available > 1e-8 || exchange_frozen > 1e-8 || exchange_borrowed > 1e-8) {
+            ERROR("Spot first-sighting non-zero (likely external deposit, non-compliant): [CURRENCY] " + currency +
+                  ", [AVAILABLE] " + std::to_string(exchange_available) + ", [FROZEN] " +
+                  std::to_string(exchange_frozen) + ", [BORROWED] " + std::to_string(exchange_borrowed));
+        }
+        SpotPosition position;
+        position.currency = currency;
+        position.available = exchange_available;
+        position.frozen = exchange_frozen;
+        position.borrowed = exchange_borrowed;
+        spot_positions_[currency] = position;
+        return;
+    }
 
+    auto& position = it->second;
     double available_diff = std::abs(position.available - exchange_available);
     double frozen_diff = std::abs(position.frozen - exchange_frozen);
     double borrowed_diff = std::abs(position.borrowed - exchange_borrowed);
 
     if (available_diff > 1e-8 || frozen_diff > 1e-8 || borrowed_diff > 1e-8) {
-        WARN("Spot position mismatch: [CURRENCY] " + currency + ", [LOCAL_AVAILABLE] " +
-             std::to_string(position.available) + ", [EXCHANGE_AVAILABLE] " + std::to_string(exchange_available) +
-             ", [LOCAL_FROZEN] " + std::to_string(position.frozen) + ", [EXCHANGE_FROZEN] " +
-             std::to_string(exchange_frozen) + ", [LOCAL_BORROWED] " + std::to_string(position.borrowed) +
-             ", [EXCHANGE_BORROWED] " + std::to_string(exchange_borrowed));
+        ERROR("Spot position mismatch: [CURRENCY] " + currency + ", [LOCAL_AVAILABLE] " +
+              std::to_string(position.available) + ", [EXCHANGE_AVAILABLE] " + std::to_string(exchange_available) +
+              ", [LOCAL_FROZEN] " + std::to_string(position.frozen) + ", [EXCHANGE_FROZEN] " +
+              std::to_string(exchange_frozen) + ", [LOCAL_BORROWED] " + std::to_string(position.borrowed) +
+              ", [EXCHANGE_BORROWED] " + std::to_string(exchange_borrowed));
         position.available = exchange_available;
         position.frozen = exchange_frozen;
         position.borrowed = exchange_borrowed;
-        spot_reserved_[currency] = 0.0;
     }
 }
 
@@ -249,13 +262,28 @@ void PositionManager::SyncSwapFromExchange(const std::string& instrument, PosSid
                                            double average_opening_price) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto key = std::make_pair(instrument, position_side);
-    auto& position = swap_positions_[key];
+    auto it = swap_positions_.find(key);
+    if (it == swap_positions_.end()) {
+        if (contracts > 1e-8) {
+            ERROR("Swap first-sighting non-zero (likely external position, non-compliant): [INSTRUMENT] " + instrument +
+                  ", [POSITION_SIDE] " + ToString(position_side) + ", [CONTRACTS] " + std::to_string(contracts) +
+                  ", [AVERAGE_OPENING_PRICE] " + std::to_string(average_opening_price));
+        }
+        SwapPosition position;
+        position.instrument = instrument;
+        position.position_side = position_side;
+        position.contracts = contracts;
+        position.average_opening_price = average_opening_price;
+        swap_positions_[key] = position;
+        return;
+    }
 
+    auto& position = it->second;
     double contracts_diff = std::abs(position.contracts - contracts);
     if (contracts_diff > 1e-8) {
-        WARN("Swap position mismatch: [INSTRUMENT] " + instrument + ", [POSITION_SIDE] " + ToString(position_side) +
-             ", [LOCAL_CONTRACTS] " + std::to_string(position.contracts) + ", [EXCHANGE_CONTRACTS] " +
-             std::to_string(contracts));
+        ERROR("Swap position mismatch: [INSTRUMENT] " + instrument + ", [POSITION_SIDE] " + ToString(position_side) +
+              ", [LOCAL_CONTRACTS] " + std::to_string(position.contracts) + ", [EXCHANGE_CONTRACTS] " +
+              std::to_string(contracts));
         position.instrument = instrument;
         position.position_side = position_side;
         position.contracts = contracts;

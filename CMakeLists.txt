@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(TARGET_NAME crypto-trading-system)
+set(TARGET_NAME auto_agent)
 
 set(CMAKE_C_COMPILER   clang-18)
 set(CMAKE_CXX_COMPILER clang++-18)
