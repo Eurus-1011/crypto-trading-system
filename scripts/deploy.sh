@@ -72,6 +72,6 @@ if [ "$ARCHIVE" -eq 1 ]; then
     bash scripts/archive.sh
 fi
 
-TARGET_NAME=crypto-trading-system
+TARGET_NAME=auto_agent
 nohup ./build/${TARGET_NAME} "$CONFIG" > /dev/null 2>&1 &
-echo "Started: pid=$! (config=$CONFIG)"
+echo "Started: $! (config=$CONFIG)"

@@ -256,6 +256,7 @@ struct OrderRequest {
     std::string size;
     std::string price;
     std::string target_currency;
+    std::string client_order_id;
 };
 
 struct Fill {

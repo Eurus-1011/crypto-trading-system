@@ -99,6 +99,11 @@ std::string OkxClient::BuildOrderMessage(const OrderRequest& req) {
         msg += req.price;
         msg += '"';
     }
+    if (!req.client_order_id.empty()) {
+        msg += R"(,"clOrdId":")";
+        msg += req.client_order_id;
+        msg += '"';
+    }
     msg += R"(}]})";
     return msg;
 }
@@ -135,29 +140,28 @@ bool OkxClient::ParseLoginResponse(const std::string& response) {
     return true;
 }
 
-void OkxClient::FetchInstrumentInfo(const std::vector<std::string>& instruments) {
+void OkxClient::FetchAllInstruments() {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
     simdjson::ondemand::parser parser;
-    for (const auto& instrument : instruments) {
-        const char* inst_type = kOkxInstType.at(DetectMarketType(instrument.c_str()));
-        std::string path = std::string(OkxApiInstruments) + "?instType=" + inst_type + "&instId=" + instrument;
+    for (const char* inst_type : {"SPOT", "SWAP"}) {
+        std::string path = std::string(OkxApiInstruments) + "?instType=" + inst_type;
         std::string raw_body = HttpsRequest(OkxRestHost, OkxRestPort, "GET", path, "", "", proxy_host, proxy_port);
         if (raw_body.empty()) {
-            WARN("FetchInstrumentInfo failed: [INSTRUMENT] " + instrument);
+            ERROR("FetchAllInstruments failed: [INST_TYPE] " + std::string(inst_type));
             continue;
         }
         auto json_start = raw_body.find('{');
         if (json_start == std::string::npos) {
-            WARN("FetchInstrumentInfo invalid response: [INSTRUMENT] " + instrument);
+            ERROR("FetchAllInstruments invalid response: [INST_TYPE] " + std::string(inst_type));
             continue;
         }
 
         simdjson::padded_string padded_body(raw_body.data() + json_start, raw_body.size() - json_start);
         simdjson::ondemand::document doc;
         if (parser.iterate(padded_body).get(doc)) {
-            WARN("FetchInstrumentInfo parse failed: [INSTRUMENT] " + instrument);
+            ERROR("FetchAllInstruments parse failed: [INST_TYPE] " + std::string(inst_type));
             continue;
         }
 
@@ -165,17 +169,30 @@ void OkxClient::FetchInstrumentInfo(const std::vector<std::string>& instruments)
         if (doc["code"].get(code_str) || code_str != "0") {
             std::string_view msg_str;
             (void)doc["msg"].get(msg_str);
-            WARN("FetchInstrumentInfo error: [INSTRUMENT] " + instrument + ", [MSG] " + std::string(msg_str));
+            ERROR("FetchAllInstruments error: [INST_TYPE] " + std::string(inst_type) + ", [MSG] " +
+                  std::string(msg_str));
             continue;
         }
 
         simdjson::ondemand::array data_array;
         if (doc["data"].get_array().get(data_array)) {
-            WARN("FetchInstrumentInfo empty data: [INSTRUMENT] " + instrument);
+            ERROR("FetchAllInstruments empty data: [INST_TYPE] " + std::string(inst_type));
             continue;
         }
 
-        for (auto element : data_array) {
+        size_t count = 0;
+        for (auto element_result : data_array) {
+            simdjson::ondemand::value element;
+            if (element_result.get(element)) {
+                continue;
+            }
+
+            std::string_view inst_id;
+            if (element["instId"].get(inst_id) || inst_id.empty()) {
+                continue;
+            }
+            std::string instrument(inst_id);
+
             int64_t code_val = 0;
             (void)element["instIdCode"].get_int64().get(code_val);
             inst_id_codes_[instrument] = static_cast<int>(code_val);
@@ -189,17 +206,15 @@ void OkxClient::FetchInstrumentInfo(const std::vector<std::string>& instruments)
             info.price_precision = CountDecimalPlaces(std::string(tick_sz_value).c_str());
             info.volume_precision = CountDecimalPlaces(std::string(lot_sz_value).c_str());
             InstrumentRegistry::Instance().Add(info);
-
-            INFO("Fetch instrument info: [INSTRUMENT] " + instrument + ", [CODE] " + std::to_string(code_val) +
-                 ", [PRICE_PRECISION] " + std::to_string(info.price_precision) + ", [VOLUME_PRECISION] " +
-                 std::to_string(info.volume_precision));
-            break;
+            ++count;
         }
+
+        INFO("Fetch instruments: [INST_TYPE] " + std::string(inst_type) + ", [COUNT] " + std::to_string(count));
     }
 }
 
-std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::string& inst_type) {
-    std::vector<ExecutionReport> result;
+std::vector<PendingOrderInfo> OkxClient::QueryPendingOrdersByType(const std::string& inst_type) {
+    std::vector<PendingOrderInfo> result;
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
@@ -266,13 +281,14 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
                 break;
             }
 
-            std::string_view inst_id, order_id, state, side, pos_side, trade_mode;
+            std::string_view inst_id, order_id, state, side, pos_side, trade_mode, client_order_id;
             (void)order_element["instId"].get(inst_id);
             (void)order_element["ordId"].get(order_id);
             (void)order_element["state"].get(state);
             (void)order_element["side"].get(side);
             (void)order_element["posSide"].get(pos_side);
             (void)order_element["tdMode"].get(trade_mode);
+            (void)order_element["clOrdId"].get(client_order_id);
 
             std::string order_id_str(order_id);
 
@@ -287,7 +303,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
 
             const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
             if (!info) {
-                WARN("Skip pending order for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
+                ERROR("Skip pending order for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
                 continue;
             }
 
@@ -299,7 +315,7 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
             report.filled_volume = Encode(acc_fill_sz_value, info->volume_precision);
             report.total_volume = Encode(sz_value, info->volume_precision);
             (void)order_element["avgPx"].get_double_in_string().get(report.avg_fill_price);
-            result.push_back(report);
+            result.push_back(PendingOrderInfo{report, std::string(client_order_id)});
 
             last_order_id = std::move(order_id_str);
             ++data_count;
@@ -313,11 +329,12 @@ std::vector<ExecutionReport> OkxClient::QueryPendingOrdersByType(const std::stri
     return result;
 }
 
-std::vector<ExecutionReport> OkxClient::QuerySpotPendingOrders() { return QueryPendingOrdersByType("SPOT"); }
+std::vector<PendingOrderInfo> OkxClient::QuerySpotPendingOrders() { return QueryPendingOrdersByType("SPOT"); }
 
-std::vector<ExecutionReport> OkxClient::QuerySwapPendingOrders() { return QueryPendingOrdersByType("SWAP"); }
+std::vector<PendingOrderInfo> OkxClient::QuerySwapPendingOrders() { return QueryPendingOrdersByType("SWAP"); }
 
-bool OkxClient::QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report) {
+bool OkxClient::QueryOrderById(const std::string& instrument, const std::string& order_id, ExecutionReport& report,
+                               std::string& client_order_id) {
     std::string proxy_host, proxy_port;
     DetectHttpProxy(proxy_host, proxy_port);
 
@@ -375,7 +392,7 @@ bool OkxClient::QueryOrderById(const std::string& instrument, const std::string&
             break;
         }
 
-        std::string_view inst_id, ord_id, state, side, pos_side, fee_currency, trade_mode;
+        std::string_view inst_id, ord_id, state, side, pos_side, fee_currency, trade_mode, client_order_id_view;
         (void)order_element["instId"].get(inst_id);
         (void)order_element["ordId"].get(ord_id);
         (void)order_element["state"].get(state);
@@ -383,6 +400,8 @@ bool OkxClient::QueryOrderById(const std::string& instrument, const std::string&
         (void)order_element["posSide"].get(pos_side);
         (void)order_element["feeCcy"].get(fee_currency);
         (void)order_element["tdMode"].get(trade_mode);
+        (void)order_element["clOrdId"].get(client_order_id_view);
+        client_order_id = std::string(client_order_id_view);
 
         std::string inst_id_str(inst_id);
 
@@ -397,7 +416,7 @@ bool OkxClient::QueryOrderById(const std::string& instrument, const std::string&
 
         const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
         if (!info) {
-            WARN("Query order for unregistered instrument: [INSTRUMENT] " + inst_id_str);
+            ERROR("Query order for unregistered instrument: [INSTRUMENT] " + inst_id_str);
             return false;
         }
 
@@ -506,7 +525,7 @@ std::vector<Fill> OkxClient::QueryRecentFills(int64_t since_ms, const std::strin
 
             const auto* info = InstrumentRegistry::Instance().Find(fill.instrument);
             if (!info) {
-                WARN("Skip fill for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
+                ERROR("Skip fill for unregistered instrument: [INSTRUMENT] " + std::string(inst_id));
                 last_bill_id = std::move(bill_id_str);
                 ++data_count;
                 continue;
@@ -795,7 +814,7 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
                         const auto* info = InstrumentRegistry::Instance().Find(req.instrument.c_str());
                         report.total_volume = info ? Encode(std::stod(req.size), info->volume_precision) : 0;
                     }
-                    on_order_update_(report);
+                    on_order_update_(report, req.client_order_id);
                     pending_ws_ops_.erase(it);
                 }
             }
@@ -830,7 +849,7 @@ void OkxClient::OnPrivateMessage(const std::string& raw) {
 }
 
 void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
-    std::string_view inst_id, order_id, state, side, pos_side, fee_currency, trade_mode;
+    std::string_view inst_id, order_id, state, side, pos_side, fee_currency, trade_mode, client_order_id;
     (void)data["instId"].get(inst_id);
     (void)data["ordId"].get(order_id);
     (void)data["state"].get(state);
@@ -838,6 +857,7 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     (void)data["posSide"].get(pos_side);
     (void)data["feeCcy"].get(fee_currency);
     (void)data["tdMode"].get(trade_mode);
+    (void)data["clOrdId"].get(client_order_id);
 
     std::string inst_id_str(inst_id);
 
@@ -852,7 +872,7 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
 
     const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
     if (!info) {
-        WARN("Skip order update for unregistered instrument: [INSTRUMENT] " + inst_id_str);
+        ERROR("Skip order update for unregistered instrument: [INSTRUMENT] " + inst_id_str);
         return;
     }
 
@@ -866,7 +886,7 @@ void OkxClient::DecodeOrderUpdate(simdjson::ondemand::value data) {
     (void)data["avgPx"].get_double_in_string().get(report.avg_fill_price);
     (void)data["fillFee"].get_double_in_string().get(report.fee);
     report.SetFeeCurrency(std::string(fee_currency).c_str());
-    on_order_update_(report);
+    on_order_update_(report, client_order_id);
 }
 
 void OkxClient::DecodeTicker(simdjson::ondemand::value data, const std::string& inst_id) {

@@ -18,7 +18,11 @@ static std::string LockedCurrency(const char* instrument, Side side) {
 }
 
 TradingEngine::TradingEngine(const SystemConfig& config, SignalRing* signal_ring, ExecutionReportRing* report_ring)
-    : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {}
+    : config_(config), signal_ring_(signal_ring), report_ring_(report_ring) {
+    for (const auto& instrument : config_.quotation_engine.instruments) {
+        strategy_instruments_.insert(instrument);
+    }
+}
 
 void TradingEngine::Init() {
     INFO("Start trading engine init");
@@ -27,12 +31,14 @@ void TradingEngine::Init() {
     client_->LoginPrivate();
     INFO("Login private ws success");
 
-    client_->FetchInstrumentInfo(config_.quotation_engine.instruments);
+    client_->FetchAllInstruments();
 
     auto balances = client_->QueryBalances();
     position_manager_.InitSpotFromExchange(balances);
 
-    client_->OnOrderUpdate([this](const ExecutionReport& report) { HandleOrderUpdate(report); });
+    client_->OnOrderUpdate([this](const ExecutionReport& report, std::string_view client_order_id) {
+        HandleOrderUpdate(report, client_order_id);
+    });
     client_->OnBalanceUpdate([this](const std::string& currency, double available, double frozen, double borrowed) {
         position_manager_.SyncSpotFromExchange(currency, available, frozen, borrowed);
     });
@@ -49,34 +55,41 @@ void TradingEngine::Init() {
     client_->SubscribePrivateChannel(OkxChannelAccount, "");
     INFO("Subscribe account channel success");
 
-    pending_orders_ = client_->QuerySpotPendingOrders();
-    INFO("Query spot pending orders complete: [COUNT] " + std::to_string(pending_orders_.size()));
+    auto spot_pending = client_->QuerySpotPendingOrders();
+    INFO("Query spot pending orders complete: [COUNT] " + std::to_string(spot_pending.size()));
 
-    bool has_swap = false;
-    for (const auto& instrument : config_.quotation_engine.instruments) {
-        if (DetectMarketType(instrument.c_str()) == MarketType::SWAP) {
-            has_swap = true;
-            break;
-        }
+    client_->SubscribePrivateChannel(OkxChannelOrders, "SWAP");
+    INFO("Subscribe orders channel success: [INST_TYPE] SWAP");
+
+    auto swap_positions = client_->QuerySwapPositions();
+    position_manager_.InitSwapFromExchange(swap_positions);
+
+    auto swap_pending = client_->QuerySwapPendingOrders();
+    INFO("Query swap pending orders complete: [COUNT] " + std::to_string(swap_pending.size()));
+
+    all_pending_orders_.clear();
+    all_pending_orders_.reserve(spot_pending.size() + swap_pending.size());
+    for (const auto& info : spot_pending) {
+        all_pending_orders_.push_back(info.report);
     }
-    if (has_swap) {
-        client_->SubscribePrivateChannel(OkxChannelOrders, "SWAP");
-        INFO("Subscribe orders channel success: [INST_TYPE] SWAP");
-
-        auto swap_positions = client_->QuerySwapPositions();
-        position_manager_.InitSwapFromExchange(swap_positions);
-
-        auto swap_pending = client_->QuerySwapPendingOrders();
-        INFO("Query swap pending orders complete: [COUNT] " + std::to_string(swap_pending.size()));
-        pending_orders_.insert(pending_orders_.end(), swap_pending.begin(), swap_pending.end());
+    for (const auto& info : swap_pending) {
+        all_pending_orders_.push_back(info.report);
     }
 
     {
         std::lock_guard<std::mutex> lock(live_orders_mutex_);
-        for (const auto& order : pending_orders_) {
+        for (const auto& order : all_pending_orders_) {
             live_order_instruments_[order.order_id] = order.instrument;
         }
     }
+
+    pending_orders_.clear();
+    for (const auto& order : all_pending_orders_) {
+        if (strategy_instruments_.count(order.instrument)) {
+            pending_orders_.push_back(order);
+        }
+    }
+    INFO("Strategy-relevant pending orders: [COUNT] " + std::to_string(pending_orders_.size()));
 
     INFO("Trading engine init complete");
 }
@@ -117,6 +130,25 @@ void TradingEngine::RunOrderDispatcher() {
                 request.price = Format(signal.price, info.price_precision);
             }
 
+            request.client_order_id = "cts" + std::to_string(NowNs());
+
+            if (signal.market_type == MarketType::SPOT) {
+                double amount = 0.0;
+                std::string currency;
+                if (request.side == Side::BUY) {
+                    currency = LockedCurrency(signal.instrument, Side::BUY);
+                    amount = Decode(signal.price, info.price_precision) * Decode(signal.volume, info.volume_precision);
+                } else if (request.trade_mode == TradeMode::CASH) {
+                    currency = LockedCurrency(signal.instrument, Side::SELL);
+                    amount = Decode(signal.volume, info.volume_precision);
+                }
+                if (amount > 0.0) {
+                    std::lock_guard<std::mutex> lock(client_order_id_mutex_);
+                    client_order_id_to_reservation_[request.client_order_id] =
+                        ReservationInfo{signal.instrument, currency, amount, request.side, request.trade_mode};
+                }
+            }
+
             client_->SendPlaceOrder(request);
         }
     }
@@ -139,21 +171,19 @@ void TradingEngine::RunReconciler() {
 void TradingEngine::ReconcileOrders() {
     auto remote_spot = client_->QuerySpotPendingOrders();
     std::unordered_set<std::string> remote_active;
-    for (const auto& order : remote_spot) {
-        remote_active.insert(order.order_id);
-    }
-
-    bool has_swap = false;
-    for (const auto& instrument : config_.quotation_engine.instruments) {
-        if (DetectMarketType(instrument.c_str()) == MarketType::SWAP) {
-            has_swap = true;
-            break;
+    std::unordered_map<std::string, ExecutionReport> remote_by_client_order_id;
+    for (const auto& info : remote_spot) {
+        remote_active.insert(info.report.order_id);
+        if (!info.client_order_id.empty()) {
+            remote_by_client_order_id[info.client_order_id] = info.report;
         }
     }
-    if (has_swap) {
-        auto remote_swap = client_->QuerySwapPendingOrders();
-        for (const auto& order : remote_swap) {
-            remote_active.insert(order.order_id);
+
+    auto remote_swap = client_->QuerySwapPendingOrders();
+    for (const auto& info : remote_swap) {
+        remote_active.insert(info.report.order_id);
+        if (!info.client_order_id.empty()) {
+            remote_by_client_order_id[info.client_order_id] = info.report;
         }
     }
 
@@ -166,25 +196,54 @@ void TradingEngine::ReconcileOrders() {
             }
         }
     }
-    if (orphans.empty()) {
-        return;
+
+    if (!orphans.empty()) {
+        INFO("Reconcile orders: [ORPHAN_COUNT] " + std::to_string(orphans.size()));
+
+        for (const auto& [id, instrument] : orphans) {
+            ExecutionReport report{};
+            std::string client_order_id;
+            if (!client_->QueryOrderById(instrument, id, report, client_order_id)) {
+                WARN("Query orphan order failed: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+                continue;
+            }
+            if (report.status == OrderStatus::NEW || report.status == OrderStatus::PARTIALLY_FILLED) {
+                INFO("Skip orphan still live on remote: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+                continue;
+            }
+            INFO("Replay missed terminal: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument + ", [STATUS] " +
+                 ToString(report.status));
+            HandleOrderUpdate(report, client_order_id);
+        }
     }
 
-    INFO("Reconcile orders: [ORPHAN_COUNT] " + std::to_string(orphans.size()));
-
-    for (const auto& [id, instrument] : orphans) {
-        ExecutionReport report{};
-        if (!client_->QueryOrderById(instrument, id, report)) {
-            WARN("Query orphan order failed: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+    std::vector<std::string> pending_client_order_ids;
+    {
+        std::lock_guard<std::mutex> lock(client_order_id_mutex_);
+        pending_client_order_ids.reserve(client_order_id_to_reservation_.size());
+        for (const auto& [client_order_id, _] : client_order_id_to_reservation_) {
+            pending_client_order_ids.push_back(client_order_id);
+        }
+    }
+    for (const auto& client_order_id : pending_client_order_ids) {
+        auto remote_it = remote_by_client_order_id.find(client_order_id);
+        if (remote_it == remote_by_client_order_id.end()) {
             continue;
         }
-        if (report.status == OrderStatus::NEW || report.status == OrderStatus::PARTIALLY_FILLED) {
-            INFO("Skip orphan still live on remote: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument);
+        bool already_live = false;
+        {
+            std::lock_guard<std::mutex> lock(live_orders_mutex_);
+            already_live =
+                live_order_instruments_.find(std::string(remote_it->second.order_id)) != live_order_instruments_.end();
+        }
+        if (already_live) {
             continue;
         }
-        INFO("Replay missed terminal: [ORDER_ID] " + id + ", [INSTRUMENT] " + instrument + ", [STATUS] " +
-             ToString(report.status));
-        HandleOrderUpdate(report);
+        ExecutionReport synth = remote_it->second;
+        synth.status = OrderStatus::NEW;
+        INFO("Replay missed NEW from remote: [ORDER_ID] " + std::string(synth.order_id) + ", [CLIENT_ORDER_ID] " +
+             client_order_id);
+        HandleOrderUpdate(synth, client_order_id);
     }
 }
 
@@ -206,12 +265,35 @@ void TradingEngine::ReconcileSwapPositions() {
     }
 }
 
-void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
+void TradingEngine::HandleOrderUpdate(const ExecutionReport& report, std::string_view client_order_id) {
     std::string order_id = std::string(report.order_id);
     std::string instrument = std::string(report.instrument);
     std::string side_str = ToString(report.side);
 
     const auto* info = InstrumentRegistry::Instance().Find(report.instrument);
+
+    if (report.status != OrderStatus::NEW && !client_order_id.empty()) {
+        bool needs_recovery = false;
+        {
+            std::lock_guard<std::mutex> lock(live_orders_mutex_);
+            needs_recovery = live_order_instruments_.find(order_id) == live_order_instruments_.end();
+        }
+        if (needs_recovery) {
+            std::lock_guard<std::mutex> lock(client_order_id_mutex_);
+            needs_recovery = client_order_id_to_reservation_.contains(std::string(client_order_id));
+        }
+        if (needs_recovery) {
+            if (report.market_type == MarketType::SPOT) {
+                position_manager_.UpdateSpotOnNew(report, report.trade_mode);
+            }
+            {
+                std::lock_guard<std::mutex> lock(live_orders_mutex_);
+                live_order_instruments_[order_id] = instrument;
+            }
+            INFO("Recovered missed NEW: [ORDER_ID] " + order_id + ", [INSTRUMENT] " + instrument + ", [CLIENT_ORDER_ID] " +
+                 std::string(client_order_id));
+        }
+    }
 
     if (report.status == OrderStatus::CANCELLED) {
         std::lock_guard<std::mutex> lock(live_orders_mutex_);
@@ -225,6 +307,13 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
     } else if (report.status == OrderStatus::FILLED || report.status == OrderStatus::REJECTED) {
         std::lock_guard<std::mutex> lock(live_orders_mutex_);
         live_order_instruments_.erase(order_id);
+    }
+
+    if (!client_order_id.empty() &&
+        (report.status == OrderStatus::NEW || report.status == OrderStatus::FILLED ||
+         report.status == OrderStatus::CANCELLED || report.status == OrderStatus::REJECTED)) {
+        std::lock_guard<std::mutex> lock(client_order_id_mutex_);
+        client_order_id_to_reservation_.erase(std::string(client_order_id));
     }
 
     if (report.status == OrderStatus::FILLED || report.status == OrderStatus::PARTIALLY_FILLED) {
@@ -275,5 +364,7 @@ void TradingEngine::HandleOrderUpdate(const ExecutionReport& report) {
         }
     }
 
-    shm_push(report_ring_, report);
+    if (strategy_instruments_.count(report.instrument)) {
+        shm_push(report_ring_, report);
+    }
 }
